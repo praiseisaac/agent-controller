@@ -1,0 +1,191 @@
+// Trimmed subset of facebook/idb's idb.proto (v1.1.8, MIT licensed).
+// Contains only the messages/RPCs the ios-sim backend uses. Field numbers match
+// upstream exactly so the wire format is compatible with idb_companion 1.1.8.
+// The full proto's DAP/debugserver messages are omitted (they hit a prost
+// nested-name collision and are unused here).
+
+syntax = "proto3";
+
+package idb;
+
+service CompanionService {
+  rpc describe(TargetDescriptionRequest) returns (TargetDescriptionResponse) {}
+  rpc accessibility_info(AccessibilityInfoRequest)
+      returns (AccessibilityInfoResponse) {}
+  rpc hid(stream HIDEvent) returns (HIDResponse) {}
+  rpc open_url(OpenUrlRequest) returns (OpenUrlResponse) {}
+  rpc launch(stream LaunchRequest) returns (stream LaunchResponse) {}
+  rpc list_apps(ListAppsRequest) returns (ListAppsResponse) {}
+  rpc terminate(TerminateRequest) returns (TerminateResponse) {}
+  rpc screenshot(ScreenshotRequest) returns (ScreenshotResponse) {}
+}
+
+message Point {
+  double x = 1;
+  double y = 2;
+}
+
+message CompanionInfo {
+  string udid = 1;
+  bool is_local = 4;
+  bytes metadata = 6;
+}
+
+message ScreenDimensions {
+  uint64 width = 1;
+  uint64 height = 2;
+  double density = 3;
+  uint64 width_points = 4;
+  uint64 height_points = 5;
+}
+
+message TargetDescription {
+  string udid = 1;
+  string name = 2;
+  ScreenDimensions screen_dimensions = 3;
+  string state = 4;
+  string target_type = 5;
+  string os_version = 6;
+  string architecture = 7;
+}
+
+message TargetDescriptionRequest {
+  bool fetch_diagnostics = 1;
+}
+
+message TargetDescriptionResponse {
+  TargetDescription target_description = 1;
+  CompanionInfo companion = 2;
+}
+
+message AccessibilityInfoRequest {
+  enum Format {
+    LEGACY = 0;
+    NESTED = 1;
+  }
+  Point point = 2;
+  Format format = 3;
+}
+
+message AccessibilityInfoResponse {
+  string json = 1;
+}
+
+message HIDEvent {
+  enum HIDDirection {
+    DOWN = 0;
+    UP = 1;
+  }
+
+  message HIDTouch {
+    Point point = 1;
+  }
+
+  enum HIDButtonType {
+    APPLE_PAY = 0;
+    HOME = 1;
+    LOCK = 2;
+    SIDE_BUTTON = 3;
+    SIRI = 4;
+  }
+
+  message HIDButton {
+    HIDButtonType button = 1;
+  }
+
+  message HIDKey {
+    uint64 keycode = 1;
+  }
+
+  message HIDPressAction {
+    oneof action {
+      HIDTouch touch = 1;
+      HIDButton button = 2;
+      HIDKey key = 3;
+    }
+  }
+
+  message HIDPress {
+    HIDPressAction action = 1;
+    HIDDirection direction = 2;
+  }
+
+  message HIDSwipe {
+    Point start = 1;
+    Point end = 2;
+    double delta = 5;
+    double duration = 6;
+  }
+
+  message HIDDelay {
+    double duration = 1;
+  }
+
+  oneof event {
+    HIDPress press = 1;
+    HIDSwipe swipe = 2;
+    HIDDelay delay = 3;
+  }
+}
+
+message HIDResponse {}
+
+message OpenUrlRequest {
+  string url = 1;
+}
+
+message OpenUrlResponse {}
+
+message LaunchRequest {
+  message Start {
+    string bundle_id = 1;
+    map<string, string> env = 2;
+    repeated string app_args = 3;
+    bool foreground_if_running = 4;
+    bool wait_for = 5;
+    bool wait_for_debugger = 6;
+  }
+  message Stop {}
+  oneof control {
+    Start start = 1;
+    Stop stop = 2;
+  }
+}
+
+message LaunchResponse {}
+
+message ListAppsRequest {
+  bool suppress_process_state = 1;
+}
+
+message ListAppsResponse {
+  repeated InstalledAppInfo apps = 1;
+}
+
+message InstalledAppInfo {
+  string bundle_id = 1;
+  string name = 2;
+  repeated string architectures = 3;
+  string install_type = 4;
+  enum AppProcessState {
+    UNKNOWN = 0;
+    NOT_RUNNING = 1;
+    RUNNING = 2;
+  }
+  AppProcessState process_state = 5;
+  bool debuggable = 6;
+  uint64 process_identifier = 7;
+}
+
+message TerminateRequest {
+  string bundle_id = 1;
+}
+
+message TerminateResponse {}
+
+message ScreenshotRequest {}
+
+message ScreenshotResponse {
+  bytes image_data = 1;
+  string image_format = 2;
+}
