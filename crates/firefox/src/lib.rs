@@ -3,7 +3,7 @@
 //! A BiDi session is bound to its WebSocket connection, so control needs a
 //! long-lived process to own that connection — the **firefox daemon** (see
 //! `daemon.rs`). The CLI is a thin client: `FirefoxController` sends action
-//! requests over a Unix socket; the daemon runs them against the live
+//! requests over a localhost TCP socket; the daemon runs them against the live
 //! [`BidiSession`]. Instances are keyed by `--session <name>` (default
 //! `default`) → an isolated profile + debug port + daemon.
 
@@ -18,7 +18,7 @@ use agent_controller_core::{
 };
 use async_trait::async_trait;
 use base64::Engine;
-use ipc::{socket_path, Req};
+use ipc::{daemon_addr, Req};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -50,8 +50,8 @@ pub(crate) async fn ensure(name: &str, profile_dir: PathBuf) -> Result<(String, 
 }
 
 /// Daemon entry point, invoked by the binary's hidden `__firefox-daemon` command.
-pub async fn run_daemon(name: String, profile_dir: PathBuf, socket: PathBuf) -> Result<()> {
-    daemon::run(name, profile_dir, socket).await
+pub async fn run_daemon(name: String, profile_dir: PathBuf, addr: String) -> Result<()> {
+    daemon::run(name, profile_dir, addr).await
 }
 
 fn js_str(s: &str) -> String {
@@ -70,7 +70,7 @@ fn js_str(s: &str) -> String {
 }
 
 pub struct FirefoxController {
-    socket: PathBuf,
+    addr: String,
     target: String,
 }
 
@@ -88,7 +88,7 @@ struct RawEl {
 
 impl FirefoxController {
     async fn call(&self, op: &str, args: Vec<String>, n: i64) -> Result<serde_json::Value> {
-        let resp = ipc::request(&self.socket, &Req { op: op.into(), args, n }).await?;
+        let resp = ipc::request(&self.addr, &Req { op: op.into(), args, n }).await?;
         if resp.ok {
             Ok(resp.data.unwrap_or(serde_json::Value::Null))
         } else {
@@ -227,13 +227,13 @@ impl Controller for FirefoxController {
 }
 
 /// Ensure the firefox daemon for `name` is running and reachable.
-async fn ensure_daemon(name: &str, profile_dir: &Path, socket: &Path) -> Result<()> {
+async fn ensure_daemon(name: &str, profile_dir: &Path, addr: &str) -> Result<()> {
     let ping = Req {
         op: "ping".into(),
         args: vec![],
         n: 0,
     };
-    if ipc::request(socket, &ping).await.is_ok() {
+    if ipc::request(addr, &ping).await.is_ok() {
         return Ok(());
     }
     // Spawn ourselves in daemon mode, detached.
@@ -251,8 +251,8 @@ async fn ensure_daemon(name: &str, profile_dir: &Path, socket: &Path) -> Result<
             name,
             "--profile",
             &profile_dir.to_string_lossy(),
-            "--socket",
-            &socket.to_string_lossy(),
+            "--addr",
+            addr,
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::from(out))
@@ -261,7 +261,7 @@ async fn ensure_daemon(name: &str, profile_dir: &Path, socket: &Path) -> Result<
         .map_err(|e| anyhow!("spawning firefox daemon: {e}"))?;
     for _ in 0..120 {
         tokio::time::sleep(Duration::from_millis(200)).await;
-        if ipc::request(socket, &ping).await.is_ok() {
+        if ipc::request(addr, &ping).await.is_ok() {
             return Ok(());
         }
     }
@@ -296,13 +296,13 @@ impl BackendFactory for FirefoxFactory {
     ) -> Result<Box<dyn Controller>> {
         let name = rec.target.clone();
         let profile_dir = store.paths(&rec.id)?.dir.join("profile");
-        let socket = socket_path(&name);
-        ensure_daemon(&name, &profile_dir, &socket).await?;
-        rec.runtime.endpoint = Some(socket.to_string_lossy().into_owned());
+        let addr = daemon_addr(&name);
+        ensure_daemon(&name, &profile_dir, &addr).await?;
+        rec.runtime.endpoint = Some(addr.clone());
         rec.runtime.alive = true;
-        rec.config = serde_json::json!({ "port": port_for(&name), "socket": socket });
+        rec.config = serde_json::json!({ "port": port_for(&name), "daemon": addr });
         Ok(Box::new(FirefoxController {
-            socket,
+            addr,
             target: name,
         }))
     }

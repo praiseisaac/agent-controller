@@ -33,9 +33,14 @@ Per-backend runtime tools (only for the backends you use):
 |---|---|
 | mac | Accessibility + Screen Recording permissions (`agent-controller doctor`) |
 | ios-sim | `brew install facebook/fb/idb-companion`; Xcode + a booted simulator |
+| android-emu | Android platform-tools (`adb`) on PATH + a running emulator/device |
 | firefox | Firefox installed (auto-detected, or `$FIREFOX_BIN`) |
 | chrome | Google Chrome installed (auto-detected, or `$CHROME_BIN`) |
 | safari | `safaridriver --enable` (or Safari ▸ Develop ▸ Allow Remote Automation) |
+| windows | Windows-only; build on Windows (MSVC toolchain). No `protoc` needed there. |
+
+`protoc` is only required when the **ios-sim** backend is built (macOS). On
+Windows, `cargo build` skips it.
 
 ### 2. Get the source
 

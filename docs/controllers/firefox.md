@@ -13,10 +13,10 @@ A BiDi session is **bound to its WebSocket connection** — when the connection
 closes, Firefox ends the session and a fresh connection cannot reclaim it (it
 hits "maximum number of active sessions"). Since each CLI invocation is ephemeral,
 a long-lived **daemon** owns the WebSocket + session for the browser's lifetime;
-CLI invocations are thin clients over a Unix socket.
+CLI invocations are thin clients over a localhost TCP socket.
 
 ```
-CLI (FirefoxController)  ──line-JSON over Unix socket──▶  firefox daemon  ──BiDi ws──▶  Firefox
+CLI (FirefoxController)  ──line-JSON over localhost TCP──▶  firefox daemon  ──BiDi ws──▶  Firefox
    navigate/snapshot/...                                  owns BidiSession            (isolated profile)
 ```
 
@@ -24,7 +24,7 @@ CLI (FirefoxController)  ──line-JSON over Unix socket──▶  firefox daem
 
 | Concern | Mechanism | File |
 |---|---|---|
-| Daemon (owns ws + session) | `agent-controller __firefox-daemon` (hidden), Unix-socket server | `src/daemon.rs`, `src/ipc.rs` |
+| Daemon (owns ws + session) | `agent-controller __firefox-daemon` (hidden), localhost-TCP server | `src/daemon.rs`, `src/ipc.rs` |
 | BiDi WebSocket client | multiplexed id/oneshot routing | `src/bidi/client.rs` |
 | BiDi session ops | navigate/evaluate/screenshot/input | `src/bidi/session.rs` |
 | Launch + endpoint discovery | `--remote-debugging-port`, poll TCP, isolated profile | `src/launch.rs` |

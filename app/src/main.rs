@@ -89,7 +89,7 @@ enum Command {
         #[arg(long)]
         profile: PathBuf,
         #[arg(long)]
-        socket: PathBuf,
+        addr: String,
     },
 }
 
@@ -128,6 +128,7 @@ async fn run() -> Result<()> {
     match &cli.command {
         Command::Sessions => return list_sessions(&store, cli.json),
         Command::Session(sub) => return session_cmd(&store, sub, cli.json),
+        #[cfg(target_os = "macos")]
         Command::Displays => {
             let displays = agent_controller_mac::displays();
             if cli.json {
@@ -148,17 +149,19 @@ async fn run() -> Result<()> {
             }
             return Ok(());
         }
+        #[cfg(not(target_os = "macos"))]
+        Command::Displays => return Err(anyhow::anyhow!("`displays` is macOS-only")),
         Command::Doctor => return doctor(cli.json).await,
         Command::Mcp => return mcp::serve().await,
         Command::FirefoxDaemon {
             session,
             profile,
-            socket,
+            addr,
         } => {
             return agent_controller_firefox::run_daemon(
                 session.clone(),
                 profile.clone(),
-                socket.clone(),
+                addr.clone(),
             )
             .await;
         }
@@ -322,6 +325,14 @@ fn session_cmd(store: &SessionStore, sub: &SessionCmd, json: bool) -> Result<()>
     Ok(())
 }
 
+#[cfg(not(target_os = "macos"))]
+async fn doctor(_json: bool) -> Result<()> {
+    println!("doctor: macOS-only permission checks; nothing to verify on this platform.");
+    println!("Browser backends (firefox/chrome) and android-emu need their tools on PATH.");
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
 async fn doctor(json: bool) -> Result<()> {
     use agent_controller_mac::setup;
     let ax = setup::ax_trusted();
@@ -387,6 +398,7 @@ async fn doctor(json: bool) -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
 fn open_settings(anchor: &str) {
     let url = format!("x-apple.systempreferences:com.apple.preference.security?{anchor}");
     let _ = std::process::Command::new("open").arg(url).status();

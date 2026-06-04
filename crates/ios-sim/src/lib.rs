@@ -1,5 +1,8 @@
+#![cfg(target_os = "macos")]
 //! iOS Simulator backend for `agent-controller`, driven over gRPC against
-//! `idb_companion`. Implements the core [`Controller`] trait:
+//! `idb_companion`. macOS-only; compiles to an empty crate elsewhere.
+//!
+//! Implements the core [`Controller`] trait:
 //! `describe` → `@ref` snapshot, `hid` → taps/typing/swipes, `screenshot` →
 //! PNG. App launch / URL open / boot go through `xcrun simctl` (reliable and
 //! dependency-free); UI interaction goes through idb's gRPC.
@@ -314,10 +317,16 @@ impl Controller for IosSimController {
         } else {
             resp.image_format
         };
-        Ok(Image {
-            data: resp.image_data,
-            format,
-        })
+        // idb returns the framebuffer at native Retina pixels (e.g. 1206x2622),
+        // but the accessibility tree and taps both work in logical points (e.g.
+        // 402x874). Downscale to points so a coordinate read off the screenshot
+        // is the same coordinate a tap expects — one space everywhere.
+        let data = match self.screen_size().await {
+            Ok((w, h)) => fit_to_points(&resp.image_data, &format, w, h)
+                .unwrap_or(resp.image_data),
+            Err(_) => resp.image_data,
+        };
+        Ok(Image { data, format })
     }
 
     fn backend(&self) -> agent_controller_core::Backend {
@@ -379,6 +388,27 @@ impl BackendFactory for IosSimFactory {
         rec.config = serde_json::json!({ "grpc_port": companion::port_for(&udid) });
         Ok(Box::new(IosSimController::open(udid, endpoint, paths)))
     }
+}
+
+/// Resize a PNG framebuffer to logical-point dimensions so screenshot pixels
+/// line up 1:1 with the coordinate space used by the snapshot tree and taps.
+/// Returns `None` (caller keeps the original) on a non-PNG format, a decode
+/// failure, or when the image is already at (or below) point size.
+fn fit_to_points(data: &[u8], format: &str, w_pts: f64, h_pts: f64) -> Option<Vec<u8>> {
+    if !format.eq_ignore_ascii_case("png") || w_pts <= 0.0 || h_pts <= 0.0 {
+        return None;
+    }
+    let img = image::load_from_memory(data).ok()?;
+    let (tw, th) = (w_pts.round() as u32, h_pts.round() as u32);
+    if tw == 0 || th == 0 || (img.width() <= tw && img.height() <= th) {
+        return None; // already point-sized (1x device) — nothing to do
+    }
+    let scaled = img.resize_exact(tw, th, image::imageops::FilterType::Triangle);
+    let mut out = std::io::Cursor::new(Vec::new());
+    scaled
+        .write_to(&mut out, image::ImageFormat::Png)
+        .ok()?;
+    Some(out.into_inner())
 }
 
 // --- HID event constructors ---

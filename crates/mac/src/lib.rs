@@ -1,4 +1,5 @@
-//! macOS desktop backend for `agent-controller`.
+#![cfg(target_os = "macos")]
+//! macOS desktop backend for `agent-controller`. macOS-only; empty elsewhere.
 //!
 //! AX-tree-first: `snapshot` reads the Accessibility tree (`@ref`s), semantic
 //! locators act via `AXPress` (cursor-free), and refs/points fall back to

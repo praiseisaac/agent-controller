@@ -1,6 +1,6 @@
 //! The firefox daemon: a long-lived process that launches/attaches Firefox,
 //! owns the BiDi WebSocket + session for the browser's lifetime, and serves
-//! action requests over a Unix socket. CLI invocations are thin clients.
+//! action requests over a localhost TCP socket. CLI invocations are thin clients.
 
 use crate::bidi::{BidiClient, BidiSession};
 use crate::ensure;
@@ -9,10 +9,10 @@ use agent_controller_core::{anyhow, Result};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::UnixListener;
+use tokio::net::TcpListener;
 
 /// Run the daemon to completion (until a `close` request or socket error).
-pub async fn run(name: String, profile_dir: PathBuf, socket: PathBuf) -> Result<()> {
+pub async fn run(name: String, profile_dir: PathBuf, addr: String) -> Result<()> {
     let (ws, _pid) = ensure(&name, profile_dir).await?;
     let client = BidiClient::connect(&format!("{ws}/session"))
         .await
@@ -23,8 +23,9 @@ pub async fn run(name: String, profile_dir: PathBuf, socket: PathBuf) -> Result<
             .map_err(|e| anyhow!("establishing BiDi session: {e}"))?,
     );
 
-    let _ = std::fs::remove_file(&socket);
-    let listener = UnixListener::bind(&socket).map_err(|e| anyhow!("binding {socket:?}: {e}"))?;
+    let listener = TcpListener::bind(&addr)
+        .await
+        .map_err(|e| anyhow!("binding {addr}: {e}"))?;
 
     loop {
         let (mut stream, _) = match listener.accept().await {
@@ -50,7 +51,6 @@ pub async fn run(name: String, profile_dir: PathBuf, socket: PathBuf) -> Result<
             break;
         }
     }
-    let _ = std::fs::remove_file(&socket);
     Ok(())
 }
 

@@ -10,13 +10,22 @@ path = "src/main.rs"
 
 [dependencies]
 agent-controller-core = { path = "../crates/core" }
-agent-controller-ios-sim = { path = "../crates/ios-sim" }
-agent-controller-mac = { path = "../crates/mac" }
+# cross-platform backends
 agent-controller-firefox = { path = "../crates/firefox" }
 agent-controller-chrome = { path = "../crates/chrome" }
-agent-controller-safari = { path = "../crates/safari" }
+agent-controller-android-emu = { path = "../crates/android-emu" }
 anyhow.workspace = true
 tokio.workspace = true
 clap.workspace = true
 serde_json.workspace = true
 base64.workspace = true
+
+# macOS-only backends
+[target.'cfg(target_os = "macos")'.dependencies]
+agent-controller-ios-sim = { path = "../crates/ios-sim" }
+agent-controller-mac = { path = "../crates/mac" }
+agent-controller-safari = { path = "../crates/safari" }
+
+# Windows-only backend
+[target.'cfg(target_os = "windows")'.dependencies]
+agent-controller-windows = { path = "../crates/windows" }

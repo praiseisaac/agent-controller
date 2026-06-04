@@ -14,8 +14,10 @@ anyhow.workspace = true
 async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-# Pinned to match the `accessibility` crate's core-foundation (0.9) so AX types
-# interoperate without a duplicate-crate version split.
+
+# macOS-only: Accessibility API + CoreGraphics. (Pinned to the `accessibility`
+# crate's core-foundation 0.9 so AX types interoperate without a version split.)
+[target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.9"
 core-graphics = { version = "0.23", features = ["highsierra", "elcapitan"] }
 accessibility = "0.1"

@@ -8,10 +8,15 @@ store, `doctor`, and MCP server work across every backend.
 | Backend | Target | Transport |
 |---|---|---|
 | `mac` | any native macOS app | Accessibility API + CGEvent + System Events |
+| `windows` | any Windows app | UI Automation + SendInput *(Windows-only)* |
 | `ios-sim` | a booted iOS Simulator | `idb_companion` gRPC + `xcrun simctl` |
+| `android-emu` | an Android emulator/device | `adb` / `uiautomator` *(any host)* |
 | `firefox` | Firefox | WebDriver BiDi (per-instance daemon) |
 | `chrome` | Chrome | DevTools Protocol (CDP) |
 | `safari` | Safari | `safaridriver` (W3C WebDriver/HTTP) |
+
+Backends are conditionally compiled: macOS builds include mac/ios-sim/safari;
+Windows builds include windows; firefox/chrome/android-emu are cross-platform.
 
 ## Install
 
@@ -31,9 +36,28 @@ PREFIX=/usr/local/bin ./install.sh
 agent-controller doctor       # check/grant per-backend permissions
 ```
 
+### Windows
+
+The `install.sh` one-liner is macOS/Unix-only; on Windows, build from a checkout.
+You need **Rust with the MSVC toolchain** (`x86_64-pc-windows-msvc`, the rustup
+default) — `protoc` is *not* required, since the only backend that needs it
+(`ios-sim`) is macOS-only and skipped on Windows.
+
+```powershell
+git clone https://github.com/praiseisaac/agent-controller.git
+cd agent-controller
+cargo build --release          # builds windows + firefox + chrome + android-emu
+.\target\release\agent-controller.exe --backend windows snapshot
+```
+
+Optionally copy `target\release\agent-controller.exe` somewhere on your `PATH`.
+UI Automation needs no special permission, but a non-elevated process can't drive
+**elevated** windows — run elevated to automate elevated apps. Details +
+troubleshooting: **[docs/controllers/windows.md](docs/controllers/windows.md)**.
+
 Build from source (`cargo install`, manual build, prerequisites, updating,
-uninstall): **[docs/install.md](docs/install.md)**. Requires Rust (rustup) and
-`protoc` (for the ios-sim gRPC codegen).
+uninstall): **[docs/install.md](docs/install.md)**. The macOS build requires Rust
+(rustup) and `protoc` (for the ios-sim gRPC codegen).
 
 ## Documentation
 
@@ -224,3 +248,16 @@ pixel read off a screenshot back to a click point, divide by that display's
   app* (e.g. iTerm/Terminal) in System Settings ▸ Privacy & Security ▸
   Accessibility. Without it, AX commands error with a clear message.
 - **Screen Recording** — required for `screenshot`.
+
+## License
+
+Licensed under either of
+
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+
+at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
+dual licensed as above, without any additional terms or conditions.

@@ -1,16 +1,47 @@
 //! Launch Chrome with CDP enabled and discover a page target's WebSocket URL.
 
 use agent_controller_core::{anyhow, Result};
-use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
+#[cfg(target_os = "macos")]
 const DEFAULT_CHROME_PATHS: &[&str] = &[
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
     "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
 ];
+
+#[cfg(target_os = "windows")]
+const DEFAULT_CHROME_PATHS: &[&str] = &[
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+];
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const DEFAULT_CHROME_PATHS: &[&str] = &[
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+];
+
+/// Spawn detached so the browser's helper processes don't keep the launching
+/// CLI's process group/pipe alive, and so the browser survives the CLI exiting.
+fn spawn_detached(cmd: &mut Command) -> std::io::Result<std::process::Child> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    }
+    cmd.spawn()
+}
 
 pub fn find_chrome() -> Option<String> {
     if let Ok(p) = std::env::var("CHROME_BIN") {
@@ -31,8 +62,8 @@ pub async fn launch(port: u16, profile_dir: PathBuf) -> Result<Option<u32>> {
         .ok_or_else(|| anyhow!("Chrome not found. Set $CHROME_BIN or install Google Chrome."))?;
     std::fs::create_dir_all(&profile_dir).ok();
 
-    let child = std::process::Command::new(&bin)
-        .arg(format!("--remote-debugging-port={port}"))
+    let mut cmd = Command::new(&bin);
+    cmd.arg(format!("--remote-debugging-port={port}"))
         .arg(format!("--user-data-dir={}", profile_dir.display()))
         .arg("--no-first-run")
         .arg("--no-default-browser-check")
@@ -40,13 +71,8 @@ pub async fn launch(port: u16, profile_dir: PathBuf) -> Result<Option<u32>> {
         .arg("about:blank")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        // Detach into its own process group so Chrome's many helper processes
-        // don't keep the parent's pipe/process-group alive (and don't get
-        // signalled when the launching CLI exits).
-        .process_group(0)
-        .spawn()
-        .map_err(|e| anyhow!("spawning Chrome: {e}"))?;
+        .stderr(Stdio::null());
+    let child = spawn_detached(&mut cmd).map_err(|e| anyhow!("spawning Chrome: {e}"))?;
     let pid = child.id();
     // Detach: don't wait, don't kill — Chrome persists across CLI invocations.
     drop(child);

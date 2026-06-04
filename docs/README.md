@@ -21,6 +21,8 @@ selected at runtime.
 | [controllers/firefox.md](controllers/firefox.md) | `firefox` | WebDriver BiDi (per-instance daemon) |
 | [controllers/chrome.md](controllers/chrome.md) | `chrome` | DevTools Protocol (CDP) |
 | [controllers/safari.md](controllers/safari.md) | `safari` | `safaridriver` (W3C WebDriver/HTTP) |
+| [controllers/windows.md](controllers/windows.md) | `windows` | UI Automation + SendInput (Windows-only) |
+| [controllers/android-emu.md](controllers/android-emu.md) | `android-emu` | `adb` / `uiautomator` (cross-platform) |
 
 ## Install
 

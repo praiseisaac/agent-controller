@@ -18,20 +18,24 @@ pub use anyhow::{anyhow, Error, Result};
 #[serde(rename_all = "kebab-case")]
 pub enum Backend {
     Mac,
+    Windows,
     Firefox,
     Chrome,
     Safari,
     IosSim,
+    AndroidEmu,
 }
 
 impl Backend {
     pub fn as_str(&self) -> &'static str {
         match self {
             Backend::Mac => "mac",
+            Backend::Windows => "windows",
             Backend::Firefox => "firefox",
             Backend::Chrome => "chrome",
             Backend::Safari => "safari",
             Backend::IosSim => "ios-sim",
+            Backend::AndroidEmu => "android-emu",
         }
     }
 }
@@ -41,10 +45,12 @@ impl std::str::FromStr for Backend {
     fn from_str(s: &str) -> Result<Self> {
         Ok(match s.to_ascii_lowercase().as_str() {
             "mac" | "macos" => Backend::Mac,
+            "windows" | "win" => Backend::Windows,
             "firefox" => Backend::Firefox,
             "chrome" => Backend::Chrome,
             "safari" => Backend::Safari,
             "ios-sim" | "ios" | "iossim" | "simulator" => Backend::IosSim,
+            "android-emu" | "android" | "androidemu" | "emulator" => Backend::AndroidEmu,
             other => return Err(anyhow!("unknown backend: {other}")),
         })
     }

@@ -1,3 +1,4 @@
+#![cfg(target_os = "macos")]
 //! Safari backend for `agent-controller`, driving Safari via `safaridriver`
 //! (W3C WebDriver over HTTP). safaridriver is the persistent server; we keep it
 //! running and reuse a stored `sessionId` across CLI invocations. Instances are

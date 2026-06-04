@@ -29,7 +29,20 @@ CLI  /  MCP server  (agent-controller mcp)
 | `agent-controller-firefox` | Firefox backend over WebDriver BiDi, with a per-instance daemon that owns the WebSocket. |
 | `agent-controller-chrome` | Chrome backend over the DevTools Protocol (CDP). |
 | `agent-controller-safari` | Safari backend over `safaridriver` (W3C WebDriver/HTTP). |
-| `agent-controller` (binary) | CLI + factory registry + MCP server; depends on every backend crate. |
+| `agent-controller-windows` | Windows desktop backend (UI Automation + SendInput + GDI). Windows-only. |
+| `agent-controller-android-emu` | Android emulator/device backend over `adb`/`uiautomator`. Cross-platform. |
+| `agent-controller` (binary) | CLI + factory registry + MCP server; depends on each backend crate (OS-gated). |
+
+### Cross-platform compilation
+
+OS-specific crates are gated so the workspace builds on every host: each is
+`#![cfg(target_os = "…")]` with its platform-only dependencies under
+`[target.'cfg(target_os = "…")'.dependencies]`, so it compiles to an empty crate
+off-platform (and `ios-sim`'s `build.rs` skips `protoc` off macOS). The `app`
+depends on backend crates via target-specific dependencies, and `factory::registry`
+gates each arm with `#[cfg(target_os = "…")]` — unavailable backends return a
+clear "not available on this platform" error. macOS build = mac/ios-sim/safari +
+firefox/chrome/android-emu; Windows build = windows + firefox/chrome/android-emu.
 
 ## The `Controller` trait
 
@@ -101,7 +114,7 @@ invocations. Each transport needs something different:
 |---|---|---|
 | mac | the app itself | re-query the AX tree (stateless) |
 | ios-sim | `idb_companion` server | reconnect gRPC on a recorded port |
-| firefox | our **daemon** (owns the BiDi ws) | Unix-socket client → daemon |
+| firefox | our **daemon** (owns the BiDi ws) | localhost-TCP client → daemon |
 | chrome | the Chrome process | reconnect CDP (transient connections OK) |
 | safari | `safaridriver` + its session | reuse the stored `sessionId` over HTTP |
 

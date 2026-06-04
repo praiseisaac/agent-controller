@@ -11,12 +11,22 @@ use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
 use tokio::time::{sleep, timeout, Duration};
 
-/// Well-known macOS install locations, most-preferred first.
+/// Well-known install locations, most-preferred first.
+#[cfg(target_os = "macos")]
 pub const DEFAULT_FIREFOX_PATHS: &[&str] = &[
     "/Applications/Firefox Nightly.app/Contents/MacOS/firefox",
     "/Applications/Firefox Developer Edition.app/Contents/MacOS/firefox",
     "/Applications/Firefox.app/Contents/MacOS/firefox",
 ];
+
+#[cfg(target_os = "windows")]
+pub const DEFAULT_FIREFOX_PATHS: &[&str] = &[
+    "C:\\Program Files\\Mozilla Firefox\\firefox.exe",
+    "C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe",
+];
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub const DEFAULT_FIREFOX_PATHS: &[&str] = &["/usr/bin/firefox", "/usr/local/bin/firefox"];
 
 /// A running Firefox instance plus the BiDi endpoint to talk to it.
 pub struct LaunchedFirefox {
@@ -40,8 +50,9 @@ pub fn find_firefox() -> Option<String> {
             return Some(p.to_string());
         }
     }
-    // Fall back to PATH lookup.
-    if let Ok(out) = std::process::Command::new("which").arg("firefox").output() {
+    // Fall back to PATH lookup (`where` on Windows, `which` elsewhere).
+    let finder = if cfg!(windows) { "where" } else { "which" };
+    if let Ok(out) = std::process::Command::new(finder).arg("firefox").output() {
         if out.status.success() {
             let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if !s.is_empty() {

@@ -14,11 +14,17 @@ anyhow.workspace = true
 async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+# macOS-only: the iOS Simulator + idb_companion gRPC stack.
+[target.'cfg(target_os = "macos")'.dependencies]
 tokio.workspace = true
 tonic.workspace = true
 prost.workspace = true
 tokio-stream = "0.1"
 tracing.workspace = true
+# Downscale Retina-pixel screenshots to logical points so the image shares the
+# coordinate space of the accessibility tree and taps.
+image = { version = "0.25", default-features = false, features = ["png"] }
 
-[build-dependencies]
+[target.'cfg(target_os = "macos")'.build-dependencies]
 tonic-build = "0.12"

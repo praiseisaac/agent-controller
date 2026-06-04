@@ -3,24 +3,41 @@
 //! derives the session id, loads/creates the record, opens (resume or spawn) the
 //! controller, and persists. Adding a backend = one new match arm + its crate.
 
+use agent_controller_android_emu::AndroidEmuFactory;
 use agent_controller_chrome::ChromeFactory;
 use agent_controller_core::{
-    Backend, BackendFactory, Controller, Options, Result, SessionRecord, SessionStore,
+    anyhow, Backend, BackendFactory, Controller, Options, Result, SessionRecord, SessionStore,
 };
 use agent_controller_firefox::FirefoxFactory;
+#[cfg(target_os = "macos")]
 use agent_controller_ios_sim::IosSimFactory;
+#[cfg(target_os = "macos")]
 use agent_controller_mac::MacFactory;
+#[cfg(target_os = "macos")]
 use agent_controller_safari::SafariFactory;
+#[cfg(target_os = "windows")]
+use agent_controller_windows::WindowsFactory;
 
-/// The backend factory for `backend`.
+/// The backend factory for `backend` on this platform.
 pub fn registry(backend: Backend) -> Result<Box<dyn BackendFactory>> {
-    Ok(match backend {
-        Backend::IosSim => Box::new(IosSimFactory),
-        Backend::Mac => Box::new(MacFactory),
-        Backend::Firefox => Box::new(FirefoxFactory),
-        Backend::Chrome => Box::new(ChromeFactory),
-        Backend::Safari => Box::new(SafariFactory),
-    })
+    match backend {
+        Backend::Firefox => Ok(Box::new(FirefoxFactory)),
+        Backend::Chrome => Ok(Box::new(ChromeFactory)),
+        Backend::AndroidEmu => Ok(Box::new(AndroidEmuFactory)),
+        #[cfg(target_os = "macos")]
+        Backend::Mac => Ok(Box::new(MacFactory)),
+        #[cfg(target_os = "macos")]
+        Backend::IosSim => Ok(Box::new(IosSimFactory)),
+        #[cfg(target_os = "macos")]
+        Backend::Safari => Ok(Box::new(SafariFactory)),
+        #[cfg(target_os = "windows")]
+        Backend::Windows => Ok(Box::new(WindowsFactory)),
+        #[allow(unreachable_patterns)]
+        other => Err(anyhow!(
+            "backend `{}` is not available on this platform",
+            other.as_str()
+        )),
+    }
 }
 
 /// Open (resume or cold-start) the session for `backend`+`opts`, persisting the

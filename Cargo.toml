@@ -1,11 +1,21 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/ios-sim", "crates/mac", "crates/firefox", "crates/chrome", "crates/safari", "app"]
+members = [
+    "crates/core",
+    "crates/ios-sim",
+    "crates/mac",
+    "crates/firefox",
+    "crates/chrome",
+    "crates/safari",
+    "crates/android-emu",
+    "crates/windows",
+    "app",
+]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 anyhow = "1"
