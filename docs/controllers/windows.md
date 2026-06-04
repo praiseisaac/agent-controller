@@ -22,7 +22,7 @@ Controls any Windows desktop application through **UI Automation**
 | press | `SendInput` virtual-key events (+ Ctrl/Shift/Alt/Win modifiers) |
 | scroll | `SendInput` mouse wheel |
 | screenshot | GDI `BitBlt` of the window (or full screen) → PNG via the `image` crate |
-| navigate | `cmd /C start <target>` (app/URL) + `SetForegroundWindow` |
+| navigate | `cmd /C start <target>` (app/URL), then waits for the launched window to reach the foreground and settle (avoids the follow-up-command focus race) |
 
 COM objects are apartment-threaded (not `Send`/`Sync`) while `Controller` is
 `Send + Sync`, so the controller stores only the target window handle as an

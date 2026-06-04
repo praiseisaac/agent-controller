@@ -36,8 +36,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_DOWN, VK_ESCAPE, VK_LEFT, VK_RETURN, VK_RIGHT, VK_SPACE, VK_TAB, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetSystemMetrics, GetWindowRect, SetForegroundWindow, SM_CXSCREEN,
-    SM_CYSCREEN,
+    GetForegroundWindow, GetSystemMetrics, GetWindowRect, SM_CXSCREEN, SM_CYSCREEN,
 };
 
 fn com_init() -> Result<()> {
@@ -210,6 +209,33 @@ fn invoke(el: &IUIAutomationElement) -> bool {
 fn send(inputs: &[INPUT]) {
     unsafe {
         SendInput(inputs, std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
+/// After launching an app, block until a window *other than* `prev` (the
+/// pre-launch foreground) has been the foreground window for a few consecutive
+/// polls — i.e. the launched window has appeared and settled. Best-effort with a
+/// ~3s budget; returns early once stable, or gives up quietly so navigate never
+/// hangs. Without this, a follow-up command can bind to the wrong window or
+/// deliver input before the new app is ready to receive it (focus race).
+fn wait_for_new_foreground(prev: isize) {
+    use std::time::Duration;
+    let (mut last, mut stable) = (0isize, 0);
+    for _ in 0..60 {
+        std::thread::sleep(Duration::from_millis(50));
+        let fg = unsafe { GetForegroundWindow().0 as isize };
+        if fg == 0 || fg == prev {
+            continue;
+        }
+        if fg == last {
+            stable += 1;
+            if stable >= 3 {
+                return;
+            }
+        } else {
+            last = fg;
+            stable = 1;
+        }
     }
 }
 
@@ -386,16 +412,17 @@ fn load_cache(path: &Path) -> Result<Snapshot> {
 #[async_trait]
 impl Controller for WindowsController {
     async fn navigate(&self, target: &str) -> Result<()> {
-        // Launch/open via the shell, then try to foreground.
+        // Launch/open via the shell. `start` activates the target's window
+        // itself, so rather than foregrounding our *old* window we wait for the
+        // launched window to actually reach the foreground and settle — that
+        // way a follow-up command binds to it (open() reads GetForegroundWindow)
+        // and input isn't delivered before the app is ready to receive it.
+        let prev = self.hwnd;
         std::process::Command::new("cmd")
             .args(["/C", "start", "", target])
             .spawn()
             .map_err(|e| anyhow!("launching {target:?}: {e}"))?;
-        if self.hwnd != 0 {
-            unsafe {
-                let _ = SetForegroundWindow(HWND(self.hwnd as *mut _));
-            }
-        }
+        wait_for_new_foreground(prev);
         Ok(())
     }
 

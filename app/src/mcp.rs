@@ -1,8 +1,8 @@
 //! MCP server (stdio, JSON-RPC 2.0) exposing the backend-agnostic `Controller`
 //! verbs as tools. Each `tools/call` builds a controller via the same
-//! `factory::create` path the CLI uses, so every backend (mac/ios-sim/firefox/
-//! chrome/safari) is drivable by an MCP client (e.g. Claude) with no per-backend
-//! code here.
+//! `factory::create` path the CLI uses, so every backend (mac/ios-sim/windows/
+//! firefox/chrome/safari) is drivable by an MCP client (e.g. Claude) with no
+//! per-backend code here.
 
 use crate::factory;
 use agent_controller_core::{Backend, Locator, Options, ScrollDir, SessionStore};
@@ -68,8 +68,8 @@ fn err(id: Option<Value>, code: i64, message: &str) -> Value {
 /// Common target-selection properties shared by every tool.
 fn target_props() -> Value {
     json!({
-        "backend": { "type": "string", "enum": ["mac","ios-sim","firefox","chrome","safari"],
-                     "description": "Which backend to drive." },
+        "backend": { "type": "string", "enum": ["mac","ios-sim","android-emu","windows","firefox","chrome","safari"],
+                     "description": "Which backend to drive (windows is Windows-only; mac/ios-sim/safari are macOS-only)." },
         "session": { "type": "string", "description": "Instance name for browsers (default 'default')." },
         "udid": { "type": "string", "description": "iOS simulator UDID (ios-sim; default booted)." },
         "app": { "type": "string", "description": "App bundle id or name (mac)." }
@@ -101,7 +101,7 @@ fn tool_specs() -> Vec<Value> {
     vec![
         tool(
             "navigate",
-            "Open a target: a URL (browsers) or an app/bundle-id (mac/ios-sim), or 'home'.",
+            "Open a target: a URL (browsers), an app/bundle-id (mac/ios-sim), an app or URL (windows, via `start`), or 'home'.",
             merge(p.clone(), vec![("target", json!({ "type": "string" }))]),
             &["backend", "target"],
         ),
