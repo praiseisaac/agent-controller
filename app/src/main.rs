@@ -3,6 +3,7 @@
 //! other backends plug in via the factory registry.
 
 mod factory;
+mod guidance;
 mod mcp;
 
 use agent_controller_core::{now, Backend, Locator, ScrollDir, SessionStore};
@@ -28,6 +29,11 @@ struct Cli {
     /// Instance name for multi-instance backends (browsers).
     #[arg(long, global = true)]
     session: Option<String>,
+
+    /// Bind to a specific OS process by pid (desktop backends: mac, windows),
+    /// to pick one instance among several of the same app.
+    #[arg(long, global = true)]
+    pid: Option<i32>,
 
     /// Session store home (overrides discovery).
     #[arg(long, global = true)]
@@ -68,6 +74,12 @@ enum Command {
     Screenshot { path: Option<String> },
     /// Invoke a native menu by path, e.g. "Format>Font>Bold" (mac).
     Menu { path: String },
+    /// Attach file(s) to a file input (browsers): upload <locator> <path>...
+    Upload {
+        locator: String,
+        #[arg(required = true)]
+        paths: Vec<String>,
+    },
     /// Show the bound target and its capabilities.
     Status,
     /// List displays with bounds + backing scale (for pixel↔point mapping).
@@ -173,6 +185,7 @@ async fn run() -> Result<()> {
         udid: cli.udid.clone(),
         app: cli.app.clone(),
         session: cli.session.clone(),
+        pid: cli.pid,
         takeover: cli.takeover,
     };
     let (ctrl, id) = factory::create(&store, backend, opts).await?;
@@ -235,6 +248,21 @@ async fn run() -> Result<()> {
         Command::Menu { path } => {
             ctrl.menu(&path).await?;
             ok(cli.json, &format!("invoked menu {path}"));
+        }
+        Command::Upload { locator, paths } => {
+            let loc = Locator::parse(&locator);
+            // Resolve to absolute paths the browser process can read (canonicalize
+            // also verifies each file exists before we hand it to the backend).
+            let abs: Vec<String> = paths
+                .iter()
+                .map(|p| {
+                    std::fs::canonicalize(p)
+                        .map(|c| c.to_string_lossy().into_owned())
+                        .map_err(|e| anyhow::anyhow!("{p}: {e}"))
+                })
+                .collect::<Result<_>>()?;
+            ctrl.set_files(&loc, &abs).await?;
+            ok(cli.json, &format!("uploaded {} file(s) to {locator}", abs.len()));
         }
         Command::Status => {
             let caps = ctrl.capabilities();

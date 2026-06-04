@@ -63,6 +63,12 @@ async fn dispatch(session: &Arc<BidiSession>, req: Req) -> Resp {
         "type" => session.type_keys(&arg(0)).await.map(|_| None),
         "press" => session.press(&arg(0)).await.map(|_| None),
         "scroll" => session.scroll(&arg(0), req.n, None).await.map(|_| None),
+        "setfiles" => {
+            // args[0] = CSS selector for the file input; args[1..] = file paths.
+            let selector = arg(0);
+            let files: Vec<String> = req.args.iter().skip(1).cloned().collect();
+            session.set_files(&selector, &files).await.map(|_| None)
+        }
         "screenshot" => session
             .screenshot()
             .await

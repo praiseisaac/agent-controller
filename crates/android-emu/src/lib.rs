@@ -3,6 +3,11 @@
 //! `input tap/text/keyevent/swipe` for actions, `screencap` for screenshots.
 //! Instances are keyed by device serial (`--session <serial>`, default the
 //! single running device).
+//!
+//! ## Automation guidance
+//! - `--session <serial>` picks a device when several are attached. Re-snapshot
+//!   after the UI changes; stale `@ref`s fail. Canonical guidance:
+//!   `app/src/guidance.rs`.
 
 mod adb;
 mod snapshot;
@@ -189,6 +194,7 @@ impl Controller for AndroidEmuController {
             menus: false,
             coordinates: true,
             screenshot: true,
+            upload: false,
         }
     }
 }

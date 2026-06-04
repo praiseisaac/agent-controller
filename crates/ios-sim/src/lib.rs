@@ -6,6 +6,11 @@
 //! `describe` → `@ref` snapshot, `hid` → taps/typing/swipes, `screenshot` →
 //! PNG. App launch / URL open / boot go through `xcrun simctl` (reliable and
 //! dependency-free); UI interaction goes through idb's gRPC.
+//!
+//! ## Automation guidance
+//! - Coordinates are logical points, and screenshots are downscaled to that same
+//!   space, so a coordinate read off a screenshot maps 1:1 to a tap. `--udid`
+//!   picks among booted sims. Canonical guidance: `app/src/guidance.rs`.
 
 pub mod idb {
     tonic::include_proto!("idb");
@@ -344,6 +349,7 @@ impl Controller for IosSimController {
             menus: false,
             coordinates: true,
             screenshot: true,
+            upload: false,
         }
     }
 }

@@ -6,6 +6,15 @@
 //! requests over a localhost TCP socket; the daemon runs them against the live
 //! [`BidiSession`]. Instances are keyed by `--session <name>` (default
 //! `default`) → an isolated profile + debug port + daemon.
+//!
+//! ## Automation guidance
+//! - Upload files with the `upload @ref <abs path>` verb (BiDi `input.setFiles`):
+//!   in-band, no OS picker, no focus stealing, works even on a background tab —
+//!   do not open the native dialog.
+//! - Do not `pkill __firefox-daemon` while in use: it orphans the BiDi session
+//!   and wedges that Firefox (restart the browser to recover).
+//! - `@ref`s are `data-abf-ref` DOM attributes; re-snapshot after navigation or a
+//!   re-render. Canonical guidance: `app/src/guidance.rs`.
 
 pub mod bidi;
 pub mod daemon;
@@ -207,6 +216,21 @@ impl Controller for FirefoxController {
         })
     }
 
+    async fn set_files(&self, loc: &Locator, paths: &[String]) -> Result<()> {
+        let selector = match loc {
+            Locator::Ref(r) => format!("[data-abf-ref=\"{r}\"]"),
+            Locator::Css(s) => s.clone(),
+            _ => {
+                return Err(anyhow!(
+                    "upload requires an @ref or css: locator addressing the file <input>"
+                ))
+            }
+        };
+        let mut args = vec![selector];
+        args.extend(paths.iter().cloned());
+        self.call("setfiles", args, 0).await.map(|_| ())
+    }
+
     fn backend(&self) -> Backend {
         Backend::Firefox
     }
@@ -222,6 +246,7 @@ impl Controller for FirefoxController {
             menus: false,
             coordinates: true,
             screenshot: true,
+            upload: true,
         }
     }
 }

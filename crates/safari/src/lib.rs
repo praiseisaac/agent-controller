@@ -7,6 +7,11 @@
 //!
 //! Requires "Allow Remote Automation" in Safari (Develop menu) — see
 //! `agent-controller doctor`.
+//!
+//! ## Automation guidance
+//! - No in-band upload (`capabilities.upload = false`). For a file `<input>`,
+//!   drive the native picker via the mac backend with `--takeover`. Canonical
+//!   guidance: `app/src/guidance.rs`.
 
 mod launch;
 mod webdriver;
@@ -238,6 +243,7 @@ impl Controller for SafariController {
             menus: false,
             coordinates: true,
             screenshot: true,
+            upload: false,
         }
     }
 }

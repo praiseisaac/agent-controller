@@ -38,6 +38,30 @@ pub fn frontmost() -> Result<(i32, String)> {
     Ok((pid, bundle))
 }
 
+/// The process (app) name for a given pid, via System Events.
+pub fn name_for_pid(pid: i32) -> Result<String> {
+    osascript(&format!(
+        "tell application \"System Events\" to get name of (first process whose unix id is {pid})"
+    ))
+}
+
+/// Bring a specific pid to the foreground and block until it is actually
+/// frontmost — the instance-targeted analogue of `activate_and_wait`, used when
+/// `--pid` picks one process among several of the same app.
+pub fn activate_pid(pid: i32) {
+    let _ = osascript(&format!(
+        "tell application \"System Events\" to set frontmost of (first process whose unix id is {pid}) to true"
+    ));
+    for _ in 0..25 {
+        if let Ok((fp, _)) = frontmost() {
+            if fp == pid {
+                return;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(80));
+    }
+}
+
 /// Resolve a running app's pid by bundle id or process name.
 pub fn pid_for(target: &str) -> Result<i32> {
     let script = if looks_like_bundle(target) {

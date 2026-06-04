@@ -6,6 +6,17 @@
 //! synthetic clicks delivered to the app via `CGEventPostToPid` (non-interruptive
 //! by default; `--takeover` uses the global cursor). Screenshots via
 //! `screencapture`.
+//!
+//! ## Automation guidance
+//! - Foreground-only: the target is activated and "owned" while driven; focus
+//!   moves to it. Use `--pid <n>` to bind one instance when several of the same
+//!   app run (session keyed `mac/pid-<n>`).
+//! - Opening a browser/native file picker REQUIRES `--takeover` (a real HID
+//!   click); AXPress and the default posted click will not open a file dialog.
+//!   Drive an Open panel: takeover-click Browse → `press Cmd+Shift+G` → `type`
+//!   the absolute path → `press Enter` → `press Enter`.
+//! - Verify with `screenshot` (shows what's in front, incl. native panels), not
+//!   AX window/sheet checks. Canonical guidance: `app/src/guidance.rs`.
 
 pub mod ax;
 pub mod display;
@@ -163,6 +174,7 @@ impl Controller for MacController {
             menus: true,
             coordinates: true,
             screenshot: true,
+            upload: false,
         }
     }
 }
@@ -199,12 +211,21 @@ impl BackendFactory for MacFactory {
 
     async fn identify(&self, opts: &Options) -> Result<Identity> {
         require_ax_trust()?;
+        // `--pid` binds to one specific instance (e.g. one of several windows of
+        // the same app); its session is keyed by pid so instances don't collide.
+        if let Some(pid) = opts.pid {
+            let target = appres::name_for_pid(pid).unwrap_or_else(|_| format!("pid-{pid}"));
+            return Ok(Identity {
+                id: format!("mac/pid-{pid}"),
+                target,
+            });
+        }
         let target = match &opts.app {
             Some(app) => app.clone(),
             None => appres::frontmost()?.1,
         };
         if target.is_empty() {
-            return Err(anyhow!("could not determine a target app; pass --app <bundle|name>"));
+            return Err(anyhow!("could not determine a target app; pass --app <bundle|name> or --pid <pid>"));
         }
         let key = target.replace(['/', ' '], "-");
         Ok(Identity {
@@ -220,11 +241,21 @@ impl BackendFactory for MacFactory {
         opts: &Options,
     ) -> Result<Box<dyn Controller>> {
         require_ax_trust()?;
-        let pid = appres::launch_and_resolve(&rec.target)?;
-        // Foreground-only model: bring the target app to the front and wait until
-        // it is actually frontmost, so keystrokes/shortcuts/formatting land in its
-        // key window (activation via `open` is asynchronous).
-        appres::activate_and_wait(&rec.target, pid);
+        // Foreground-only model: bring the target to the front and wait until it
+        // is actually frontmost, so keystrokes/shortcuts/formatting land in its
+        // key window (activation is asynchronous). With `--pid` we target that
+        // exact process; otherwise we resolve/launch by app name.
+        let pid = match opts.pid {
+            Some(pid) => {
+                appres::activate_pid(pid);
+                pid
+            }
+            None => {
+                let pid = appres::launch_and_resolve(&rec.target)?;
+                appres::activate_and_wait(&rec.target, pid);
+                pid
+            }
+        };
         rec.runtime.pids = vec![pid as u32];
         rec.runtime.alive = true;
         rec.config = serde_json::json!({ "pid": pid });

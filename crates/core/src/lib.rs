@@ -210,6 +210,8 @@ pub struct Capabilities {
     pub coordinates: bool,
     /// Capture screenshots.
     pub screenshot: bool,
+    /// Attach files to a file `<input>` in-band ([`Controller::set_files`]).
+    pub upload: bool,
 }
 
 /// Construction inputs common across backends; each uses what applies.
@@ -221,6 +223,9 @@ pub struct Options {
     pub app: Option<String>,
     /// Instance name for multi-instance backends (browsers); default `default`.
     pub session: Option<String>,
+    /// Bind to a specific OS process by pid, disambiguating among multiple
+    /// instances of the same app (desktop backends: mac, windows).
+    pub pid: Option<i32>,
     /// Use the global cursor / focus-stealing input path (mac) instead of the
     /// non-interruptive targeted path.
     pub takeover: bool,
@@ -284,6 +289,13 @@ pub trait Controller: Send + Sync {
     /// menus return an error.
     async fn menu(&self, _path: &str) -> Result<()> {
         Err(anyhow!("menu is not supported by this backend"))
+    }
+
+    /// Attach file(s) to a file `<input>` element (browsers), in-band — no native
+    /// file dialog. `loc` must address the input (use `@ref` or `css:`); `paths`
+    /// are absolute file paths. Backends without a DOM return an error.
+    async fn set_files(&self, _loc: &Locator, _paths: &[String]) -> Result<()> {
+        Err(anyhow!("file upload is not supported by this backend"))
     }
 
     /// Which backend this is.

@@ -9,6 +9,11 @@
 //! `Send + Sync`, so the controller stores only plain data (target window
 //! handle); each method initializes COM and builds the automation object on its
 //! own thread. Fine for a one-shot CLI.
+//!
+//! ## Automation guidance
+//! - Binds to the foreground window, or `--pid <n>` for a specific process's
+//!   main window. No in-band upload — drive native file dialogs with keystrokes
+//!   like the mac route. Canonical guidance: `app/src/guidance.rs`.
 
 use agent_controller_core::{
     anyhow, Backend, BackendFactory, Capabilities, Controller, Element, Identity, Image, Locator,
@@ -17,7 +22,7 @@ use agent_controller_core::{
 use async_trait::async_trait;
 use std::path::Path;
 
-use windows::Win32::Foundation::{HWND, RECT};
+use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
 use windows::Win32::Graphics::Gdi::{
     BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits,
     ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, SRCCOPY,
@@ -36,7 +41,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_DOWN, VK_ESCAPE, VK_LEFT, VK_RETURN, VK_RIGHT, VK_SPACE, VK_TAB, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetSystemMetrics, GetWindowRect, SM_CXSCREEN, SM_CYSCREEN,
+    EnumWindows, GetForegroundWindow, GetSystemMetrics, GetWindowRect, GetWindowTextLengthW,
+    GetWindowThreadProcessId, IsWindowVisible, SetForegroundWindow, SM_CXSCREEN, SM_CYSCREEN,
 };
 
 fn com_init() -> Result<()> {
@@ -218,6 +224,29 @@ fn send(inputs: &[INPUT]) {
 /// ~3s budget; returns early once stable, or gives up quietly so navigate never
 /// hangs. Without this, a follow-up command can bind to the wrong window or
 /// deliver input before the new app is ready to receive it (focus race).
+/// EnumWindows callback: find the first visible, titled top-level window owned
+/// by the target pid. `lparam` points at `(pid, out_hwnd)`.
+unsafe extern "system" fn enum_pid_window(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    let data = &mut *(lparam.0 as *mut (u32, isize));
+    let mut wpid = 0u32;
+    GetWindowThreadProcessId(hwnd, Some(&mut wpid));
+    if wpid == data.0 && IsWindowVisible(hwnd).as_bool() && GetWindowTextLengthW(hwnd) > 0 {
+        data.1 = hwnd.0 as isize;
+        return BOOL(0); // stop enumeration
+    }
+    BOOL(1) // continue
+}
+
+/// The main (visible, titled) top-level window handle for a pid, so `--pid`
+/// can bind to one specific instance among several of the same app.
+fn main_window_for_pid(pid: u32) -> Option<isize> {
+    let mut data: (u32, isize) = (pid, 0);
+    unsafe {
+        let _ = EnumWindows(Some(enum_pid_window), LPARAM(&mut data as *mut _ as isize));
+    }
+    (data.1 != 0).then_some(data.1)
+}
+
 fn wait_for_new_foreground(prev: isize) {
     use std::time::Duration;
     let (mut last, mut stable) = (0isize, 0);
@@ -532,6 +561,7 @@ impl Controller for WindowsController {
             menus: false,
             coordinates: true,
             screenshot: true,
+            upload: false,
         }
     }
 }
@@ -561,6 +591,13 @@ impl BackendFactory for WindowsFactory {
     }
 
     async fn identify(&self, opts: &Options) -> Result<Identity> {
+        // `--pid` binds to one specific instance; key its session by pid.
+        if let Some(pid) = opts.pid {
+            return Ok(Identity {
+                id: format!("windows/pid-{pid}"),
+                target: format!("pid-{pid}"),
+            });
+        }
         let name = opts
             .app
             .clone()
@@ -576,11 +613,21 @@ impl BackendFactory for WindowsFactory {
         &self,
         rec: &mut SessionRecord,
         store: &SessionStore,
-        _opts: &Options,
+        opts: &Options,
     ) -> Result<Box<dyn Controller>> {
-        // Bind to the current foreground window (a future improvement: resolve a
-        // window by title/app for rec.target).
-        let hwnd = unsafe { GetForegroundWindow().0 as isize };
+        // With `--pid`, bind to that process's main window and foreground it;
+        // otherwise bind to the current foreground window.
+        let hwnd = match opts.pid {
+            Some(pid) => {
+                let h = main_window_for_pid(pid as u32)
+                    .ok_or_else(|| anyhow!("no visible top-level window for pid {pid}"))?;
+                unsafe {
+                    let _ = SetForegroundWindow(HWND(h as *mut _));
+                }
+                h
+            }
+            None => unsafe { GetForegroundWindow().0 as isize },
+        };
         rec.runtime.alive = true;
         rec.config = serde_json::json!({ "hwnd": hwnd });
         let paths = store.paths(&rec.id)?;

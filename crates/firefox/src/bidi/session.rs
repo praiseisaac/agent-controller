@@ -459,6 +459,49 @@ impl BidiSession {
         .await
     }
 
+    /// Attach files to a file `<input>` matching `selector`, via BiDi
+    /// `input.setFiles` — the in-band equivalent of picking files in the native
+    /// dialog (no OS file picker, no focus stealing). Resolves the element to a
+    /// shared reference first (`resultOwnership: root` so the result carries a
+    /// `sharedId`).
+    pub async fn set_files(&self, selector: &str, files: &[String]) -> Result<(), String> {
+        let ctx = self.active_context().await?;
+        let res = self
+            .send_timeout(
+                "script.evaluate",
+                json!({
+                    "expression": format!("document.querySelector({})", js_string(selector)),
+                    "target": { "context": ctx },
+                    "awaitPromise": false,
+                    "resultOwnership": "root",
+                }),
+                CMD_TIMEOUT,
+            )
+            .await?;
+        if res.get("type").and_then(Value::as_str) == Some("exception") {
+            return Err(format!("resolving {selector} raised an exception"));
+        }
+        let result = res.get("result").cloned().unwrap_or(Value::Null);
+        if result.get("type").and_then(Value::as_str) != Some("node") {
+            return Err(format!("no element matches {selector}"));
+        }
+        let shared_id = result
+            .get("sharedId")
+            .and_then(Value::as_str)
+            .ok_or("matched element has no shared reference")?;
+        self.send_timeout(
+            "input.setFiles",
+            json!({
+                "context": ctx,
+                "element": { "sharedId": shared_id },
+                "files": files,
+            }),
+            CMD_TIMEOUT,
+        )
+        .await
+        .map(|_| ())
+    }
+
     // ---- Waiting -----------------------------------------------------------
 
     /// Poll a boolean JS expression until it is truthy or the timeout elapses.

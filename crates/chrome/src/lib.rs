@@ -3,6 +3,12 @@
 //! each CLI invocation reconnects to a persistent Chrome — no daemon needed.
 //! Instances are keyed by `--session <name>` (default `default`) → an isolated
 //! profile + debug port.
+//!
+//! ## Automation guidance
+//! - Upload files with `upload @ref <abs path>` (CDP `DOM.setFileInputFiles`):
+//!   in-band, no OS picker, no focus stealing.
+//! - Re-snapshot after the page changes; stale `@ref`s fail with "no element".
+//!   Canonical guidance: `app/src/guidance.rs`.
 
 mod cdp;
 mod launch;
@@ -237,6 +243,38 @@ impl Controller for ChromeController {
         })
     }
 
+    async fn set_files(&self, loc: &Locator, paths: &[String]) -> Result<()> {
+        let selector = match loc {
+            Locator::Ref(r) => format!("[data-abf-ref=\"{r}\"]"),
+            Locator::Css(s) => s.clone(),
+            _ => {
+                return Err(anyhow!(
+                    "upload requires an @ref or css: locator addressing the file <input>"
+                ))
+            }
+        };
+        // Resolve the input to a RemoteObject (objectId), then attach the files
+        // in-band via DOM.setFileInputFiles — no native picker.
+        let r = self
+            .cdp
+            .send(
+                "Runtime.evaluate",
+                json!({ "expression": format!("document.querySelector({})", js_str(&selector)), "returnByValue": false }),
+            )
+            .await
+            .map_err(|e| anyhow!(e))?;
+        let object_id = r
+            .get("result")
+            .and_then(|res| res.get("objectId"))
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow!("no element matches {selector}"))?;
+        self.cdp
+            .send("DOM.setFileInputFiles", json!({ "files": paths, "objectId": object_id }))
+            .await
+            .map_err(|e| anyhow!(e))
+            .map(|_| ())
+    }
+
     fn backend(&self) -> Backend {
         Backend::Chrome
     }
@@ -252,6 +290,7 @@ impl Controller for ChromeController {
             menus: false,
             coordinates: true,
             screenshot: true,
+            upload: true,
         }
     }
 }

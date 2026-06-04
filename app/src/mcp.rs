@@ -4,7 +4,7 @@
 //! firefox/chrome/safari) is drivable by an MCP client (e.g. Claude) with no
 //! per-backend code here.
 
-use crate::factory;
+use crate::{factory, guidance};
 use agent_controller_core::{Backend, Locator, Options, ScrollDir, SessionStore};
 use anyhow::Result;
 use base64::Engine;
@@ -37,7 +37,15 @@ pub async fn serve() -> Result<()> {
                 json!({
                     "protocolVersion": PROTOCOL_VERSION,
                     "capabilities": { "tools": {} },
-                    "serverInfo": { "name": "agent-controller", "version": env!("CARGO_PKG_VERSION") }
+                    "serverInfo": { "name": "agent-controller", "version": env!("CARGO_PKG_VERSION") },
+                    // Operating guidance the client can show the model up front; the
+                    // `guidance` tool returns per-backend detail on demand.
+                    "instructions": format!(
+                        "{}\n\nEach tool takes a `backend`. Call the `guidance` tool with a \
+                         `backend` for that controller's specifics (foreground/takeover rules, \
+                         upload method, instance targeting) before automating it.",
+                        guidance::general()
+                    )
                 }),
             )),
             "tools/list" => Some(ok(id, json!({ "tools": tool_specs() }))),
@@ -72,7 +80,8 @@ fn target_props() -> Value {
                      "description": "Which backend to drive (windows is Windows-only; mac/ios-sim/safari are macOS-only)." },
         "session": { "type": "string", "description": "Instance name for browsers (default 'default')." },
         "udid": { "type": "string", "description": "iOS simulator UDID (ios-sim; default booted)." },
-        "app": { "type": "string", "description": "App bundle id or name (mac)." }
+        "app": { "type": "string", "description": "App bundle id or name (mac)." },
+        "pid": { "type": "integer", "description": "Bind to a specific process by pid (mac/windows), to pick one instance among several of the same app." }
     })
 }
 
@@ -99,6 +108,13 @@ fn tool(name: &str, desc: &str, props: Value, required: &[&str]) -> Value {
 fn tool_specs() -> Vec<Value> {
     let p = target_props();
     vec![
+        tool(
+            "guidance",
+            "Best-practice notes for driving the controllers (snapshot/ref staleness, verifying with screenshots, mac foreground/takeover rules, in-band upload vs native dialog, instance targeting by pid). Read this before automating a backend.",
+            json!({ "backend": { "type": "string", "enum": ["mac","ios-sim","android-emu","windows","firefox","chrome","safari"],
+                                 "description": "Optional: get this backend's specifics. Omit for all." } }),
+            &[],
+        ),
         tool(
             "navigate",
             "Open a target: a URL (browsers), an app/bundle-id (mac/ios-sim), an app or URL (windows, via `start`), or 'home'.",
@@ -143,9 +159,21 @@ fn tool_specs() -> Vec<Value> {
         ),
         tool(
             "screenshot",
-            "Capture a screenshot of the target as a PNG image.",
+            "Capture a screenshot of the target as a PNG image. Prefer this to confirm state — it shows what is in front (including native dialogs/panels the tree can't see).",
             p.clone(),
             &["backend"],
+        ),
+        tool(
+            "upload",
+            "Attach file(s) to a file <input>, in-band with no native dialog (firefox/chrome only — check capabilities.upload). Locator must address the input (@ref or css:#sel). Paths are absolute. For backends without this, drive the native picker via the mac backend with takeover.",
+            merge(
+                p.clone(),
+                vec![
+                    ("locator", json!({ "type": "string" })),
+                    ("paths", json!({ "type": "array", "items": { "type": "string" }, "description": "Absolute file path(s)." })),
+                ],
+            ),
+            &["backend", "locator", "paths"],
         ),
     ]
 }
@@ -172,11 +200,21 @@ fn str_arg<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
 }
 
 async fn run_tool(store: &SessionStore, name: &str, args: &Value) -> Result<Value> {
+    // Informational tool — no controller needed.
+    if name == "guidance" {
+        let text = match str_arg(args, "backend") {
+            Some(b) => format!("{}\n\n{}", guidance::general(), guidance::for_backend(b.parse()?)),
+            None => guidance::all(),
+        };
+        return Ok(text_result(text));
+    }
+
     let backend: Backend = str_arg(args, "backend").unwrap_or("ios-sim").parse()?;
     let opts = Options {
         udid: str_arg(args, "udid").map(str::to_string),
         app: str_arg(args, "app").map(str::to_string),
         session: str_arg(args, "session").map(str::to_string),
+        pid: args.get("pid").and_then(|v| v.as_i64()).map(|n| n as i32),
         takeover: args.get("takeover").and_then(|v| v.as_bool()).unwrap_or(false),
     };
     let (ctrl, _id) = factory::create(store, backend, opts).await?;
@@ -216,6 +254,16 @@ async fn run_tool(store: &SessionStore, name: &str, args: &Value) -> Result<Valu
             let img = ctrl.screenshot().await?;
             let b64 = base64::engine::general_purpose::STANDARD.encode(&img.data);
             json!({ "content": [{ "type": "image", "data": b64, "mimeType": "image/png" }] })
+        }
+        "upload" => {
+            let loc = Locator::parse(str_arg(args, "locator").unwrap_or_default());
+            let paths: Vec<String> = args
+                .get("paths")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|p| p.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+            ctrl.set_files(&loc, &paths).await?;
+            text_result(format!("uploaded {} file(s)", paths.len()))
         }
         other => return Err(anyhow::anyhow!("unknown tool: {other}")),
     })
