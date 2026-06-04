@@ -50,7 +50,34 @@ cargo build --release          # builds windows + firefox + chrome + android-emu
 .\target\release\agent-controller.exe --backend windows snapshot
 ```
 
-Optionally copy `target\release\agent-controller.exe` somewhere on your `PATH`.
+Optionally add the binary to your `PATH`:
+
+```powershell
+# PowerShell (current user, persistent)
+$bin = "$env:USERPROFILE\.agent-controller\bin"
+New-Item -ItemType Directory -Force -Path $bin | Out-Null
+Copy-Item .\target\release\agent-controller.exe $bin
+[Environment]::SetEnvironmentVariable("Path", "$bin;" + [Environment]::GetEnvironmentVariable("Path", "User"), "User")
+# restart your terminal for the change to take effect
+```
+
+```bat
+rem Command Prompt (current user, persistent)
+set "BIN=%USERPROFILE%\.agent-controller\bin"
+mkdir "%BIN%" 2>nul
+copy /Y target\release\agent-controller.exe "%BIN%"
+setx PATH "%BIN%;%PATH%"
+rem restart your terminal for the change to take effect
+```
+
+```bash
+# Git Bash / MSYS2
+BIN="$HOME/.agent-controller/bin"
+mkdir -p "$BIN"
+cp target/release/agent-controller.exe "$BIN/"
+echo 'export PATH="$HOME/.agent-controller/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
 UI Automation needs no special permission, but a non-elevated process can't drive
 **elevated** windows — run elevated to automate elevated apps. Details +
 troubleshooting: **[docs/controllers/windows.md](docs/controllers/windows.md)**.

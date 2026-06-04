@@ -26,5 +26,5 @@ tracing.workspace = true
 # coordinate space of the accessibility tree and taps.
 image = { version = "0.25", default-features = false, features = ["png"] }
 
-[target.'cfg(target_os = "macos")'.build-dependencies]
+[build-dependencies]
 tonic-build = "0.12"

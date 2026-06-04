@@ -47,6 +47,35 @@ cargo build --release            # builds windows + firefox + chrome + android-e
 .\target\release\agent-controller.exe --backend windows snapshot
 ```
 
+### Adding to PATH
+
+```powershell
+# PowerShell (current user, persistent)
+$bin = "$env:USERPROFILE\.agent-controller\bin"
+New-Item -ItemType Directory -Force -Path $bin | Out-Null
+Copy-Item .\target\release\agent-controller.exe $bin
+[Environment]::SetEnvironmentVariable("Path", "$bin;" + [Environment]::GetEnvironmentVariable("Path", "User"), "User")
+# restart your terminal for the change to take effect
+```
+
+```bat
+rem Command Prompt (current user, persistent)
+set "BIN=%USERPROFILE%\.agent-controller\bin"
+mkdir "%BIN%" 2>nul
+copy /Y target\release\agent-controller.exe "%BIN%"
+setx PATH "%BIN%;%PATH%"
+rem restart your terminal for the change to take effect
+```
+
+```bash
+# Git Bash / MSYS2
+BIN="$HOME/.agent-controller/bin"
+mkdir -p "$BIN"
+cp target/release/agent-controller.exe "$BIN/"
+echo 'export PATH="$HOME/.agent-controller/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
+
 The mac/ios-sim/safari crates are skipped on Windows (cfg-gated to empty). If the
 build hits `windows`-crate API mismatches, share the errors and we'll adjust the
 imports/signatures (they vary by `windows` crate version).
