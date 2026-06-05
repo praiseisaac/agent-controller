@@ -9,7 +9,7 @@ use anyhow::{anyhow, Result};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_tungstenite::connect_async;
@@ -22,6 +22,11 @@ pub struct BidiClient {
     next_id: AtomicU64,
     cmd_tx: mpsc::UnboundedSender<Message>,
     pending: Pending,
+    /// Set once the reader task exits (the browser/WebSocket is gone). Makes
+    /// every later `send` fail instantly instead of hanging until the per-command
+    /// timeout — otherwise a command issued *after* the socket closed inserts into
+    /// `pending` with no reader left to ever fail it.
+    closed: Arc<AtomicBool>,
     /// Broadcast of every `type: "event"` message received. Reserved for
     /// event-driven waits (navigation/load), not yet wired into the CLI.
     #[allow(dead_code)]
@@ -39,6 +44,7 @@ impl BidiClient {
         let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<Message>();
         let (events_tx, _) = tokio::sync::broadcast::channel::<Value>(1024);
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
+        let closed = Arc::new(AtomicBool::new(false));
 
         // Single writer task owns the sink.
         tokio::spawn(async move {
@@ -52,6 +58,7 @@ impl BidiClient {
         // Reader task routes responses and events.
         let pending_r = pending.clone();
         let events_r = events_tx.clone();
+        let closed_r = closed.clone();
         tokio::spawn(async move {
             while let Some(next) = read.next().await {
                 let msg = match next {
@@ -64,7 +71,9 @@ impl BidiClient {
                     }
                 }
             }
-            // Socket closed: fail everyone still waiting.
+            // Socket closed: mark closed so later sends fail fast, and fail
+            // everyone still waiting.
+            closed_r.store(true, Ordering::SeqCst);
             let mut p = pending_r.lock().await;
             for (_, tx) in p.drain() {
                 let _ = tx.send(Err("BiDi connection closed".into()));
@@ -75,8 +84,14 @@ impl BidiClient {
             next_id: AtomicU64::new(1),
             cmd_tx,
             pending,
+            closed,
             events_tx,
         }))
+    }
+
+    /// Whether the WebSocket has closed (the browser is gone).
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
     }
 
     /// Subscribe to the raw event stream. Reserved for event-driven waits.
@@ -87,6 +102,11 @@ impl BidiClient {
 
     /// Send a command and await its result, mapping BiDi errors to `Err`.
     pub async fn send(&self, method: &str, params: Value) -> Result<Value, String> {
+        // Fast-fail once the socket is gone: no reader remains to ever complete
+        // this request, so awaiting it would just hang until the caller's timeout.
+        if self.closed.load(Ordering::SeqCst) {
+            return Err("BiDi connection closed".to_string());
+        }
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(id, tx);

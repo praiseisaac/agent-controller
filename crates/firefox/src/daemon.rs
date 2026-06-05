@@ -27,6 +27,21 @@ pub async fn run(name: String, profile_dir: PathBuf, addr: String) -> Result<()>
         .await
         .map_err(|e| anyhow!("binding {addr}: {e}"))?;
 
+    // Watchdog: if the browser is closed/crashes, the BiDi socket dies. Exit the
+    // daemon so it stops answering `ping` (and `ensure_daemon` respawns a fresh
+    // browser on the next call) instead of lingering and timing out every request.
+    {
+        let session = Arc::clone(&session);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                if !session.is_connected() {
+                    std::process::exit(0);
+                }
+            }
+        });
+    }
+
     loop {
         let (mut stream, _) = match listener.accept().await {
             Ok(c) => c,
@@ -47,7 +62,9 @@ pub async fn run(name: String, profile_dir: PathBuf, addr: String) -> Result<()>
             let _ = stream.write_all(line.as_bytes()).await;
             let _ = stream.shutdown().await;
         }
-        if close {
+        // Exit promptly if the browser died mid-request, too (don't wait for the
+        // 500ms watchdog tick).
+        if close || !session.is_connected() {
             break;
         }
     }

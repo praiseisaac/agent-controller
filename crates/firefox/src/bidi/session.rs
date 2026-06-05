@@ -202,6 +202,12 @@ impl BidiSession {
         self.context.lock().map(|g| g.clone()).unwrap_or_default()
     }
 
+    /// Whether the underlying browser/WebSocket is still alive. Goes false when
+    /// the browser is closed or crashes; the daemon watches this to exit.
+    pub fn is_connected(&self) -> bool {
+        !self.client.is_closed()
+    }
+
     /// Send a command with a timeout, mapping a timeout to a readable error.
     async fn send_timeout(
         &self,
