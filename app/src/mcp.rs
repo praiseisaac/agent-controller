@@ -5,7 +5,7 @@
 //! per-backend code here.
 
 use crate::{factory, guidance};
-use agent_controller_core::{Backend, Locator, Options, ScrollDir, SessionStore};
+use agent_controller_core::{Backend, LaunchConfig, Locator, Options, ScrollDir, SessionStore};
 use anyhow::Result;
 use base64::Engine;
 use serde_json::{json, Value};
@@ -81,7 +81,9 @@ fn target_props() -> Value {
         "session": { "type": "string", "description": "Instance name for browsers (default 'default')." },
         "udid": { "type": "string", "description": "iOS simulator UDID (ios-sim; default booted)." },
         "app": { "type": "string", "description": "App bundle id or name (mac)." },
-        "pid": { "type": "integer", "description": "Bind to a specific process by pid (mac/windows), to pick one instance among several of the same app." }
+        "pid": { "type": "integer", "description": "Bind to a specific process by pid (mac/windows), to pick one instance among several of the same app." },
+        "window_size": { "type": "string", "description": "Browser window size on cold start, WIDTHxHEIGHT (e.g. 1360x800); overrides config.toml. Default 1360x800 (~1.7:1). Ignored if the browser is already running." },
+        "headless": { "type": "boolean", "description": "Launch the browser headless (chrome/firefox) on cold start." }
     })
 }
 
@@ -199,6 +201,20 @@ fn str_arg<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
     args.get(key).and_then(|v| v.as_str())
 }
 
+/// The launch-config layer contributed by a tool call's arguments.
+fn launch_overrides(args: &Value) -> Result<LaunchConfig> {
+    let mut l = LaunchConfig::default();
+    if let Some(s) = str_arg(args, "window_size") {
+        let (w, h) = LaunchConfig::parse_size(s)?;
+        l.width = Some(w);
+        l.height = Some(h);
+    }
+    if let Some(h) = args.get("headless").and_then(|v| v.as_bool()) {
+        l.headless = Some(h);
+    }
+    Ok(l)
+}
+
 async fn run_tool(store: &SessionStore, name: &str, args: &Value) -> Result<Value> {
     // Informational tool — no controller needed.
     if name == "guidance" {
@@ -216,6 +232,7 @@ async fn run_tool(store: &SessionStore, name: &str, args: &Value) -> Result<Valu
         session: str_arg(args, "session").map(str::to_string),
         pid: args.get("pid").and_then(|v| v.as_i64()).map(|n| n as i32),
         takeover: args.get("takeover").and_then(|v| v.as_bool()).unwrap_or(false),
+        launch: launch_overrides(args)?,
     };
     let (ctrl, _id) = factory::create(store, backend, opts).await?;
 

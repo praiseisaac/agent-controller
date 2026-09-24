@@ -14,7 +14,10 @@
 //! - Do not `pkill __firefox-daemon` while in use: it orphans the BiDi session
 //!   and wedges that Firefox (restart the browser to recover).
 //! - `@ref`s are `data-abf-ref` DOM attributes; re-snapshot after navigation or a
-//!   re-render. Canonical guidance: `app/src/guidance.rs`.
+//!   re-render.
+//! - Windows cold-start at 1360x800 (~1.7:1) unless configured
+//!   (`Options::launch`, forwarded to the daemon); a running Firefox is not resized.
+//!   Canonical guidance: `app/src/guidance.rs`.
 
 pub mod bidi;
 pub mod daemon;
@@ -22,8 +25,8 @@ pub mod ipc;
 mod launch;
 
 use agent_controller_core::{
-    anyhow, Backend, BackendFactory, Capabilities, Controller, Element, Identity, Image, Locator,
-    Options, Rect, Result, ScrollDir, SessionRecord, SessionStore, Snapshot,
+    anyhow, Backend, BackendFactory, Capabilities, Controller, Element, Identity, Image,
+    LaunchConfig, Locator, Options, Rect, Result, ScrollDir, SessionRecord, SessionStore, Snapshot,
 };
 use async_trait::async_trait;
 use base64::Engine;
@@ -44,13 +47,17 @@ fn port_for(name: &str) -> u16 {
 
 /// Ensure a Firefox is serving BiDi for `name`; returns the ws base url and, if
 /// launched this call, its pid. Used by the daemon (which then owns the ws).
-pub(crate) async fn ensure(name: &str, profile_dir: PathBuf) -> Result<(String, Option<u32>)> {
+pub(crate) async fn ensure(
+    name: &str,
+    profile_dir: PathBuf,
+    launch: &LaunchConfig,
+) -> Result<(String, Option<u32>)> {
     let port = port_for(name);
     let ws = format!("ws://127.0.0.1:{port}");
     if tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
         return Ok((ws, None));
     }
-    let launched = launch::launch(port, false, profile_dir)
+    let launched = launch::launch(port, launch, profile_dir)
         .await
         .map_err(|e| anyhow!("launching Firefox: {e}"))?;
     let pid = launched.child.id();
@@ -59,8 +66,15 @@ pub(crate) async fn ensure(name: &str, profile_dir: PathBuf) -> Result<(String, 
 }
 
 /// Daemon entry point, invoked by the binary's hidden `__firefox-daemon` command.
-pub async fn run_daemon(name: String, profile_dir: PathBuf, addr: String) -> Result<()> {
-    daemon::run(name, profile_dir, addr).await
+/// `launch` is the resolved launch config the CLI computed (the daemon does not
+/// re-read the config file, so CLI overrides reach the browser).
+pub async fn run_daemon(
+    name: String,
+    profile_dir: PathBuf,
+    addr: String,
+    launch: LaunchConfig,
+) -> Result<()> {
+    daemon::run(name, profile_dir, addr, launch).await
 }
 
 fn js_str(s: &str) -> String {
@@ -251,16 +265,23 @@ impl Controller for FirefoxController {
     }
 }
 
-/// Ensure the firefox daemon for `name` is running and reachable.
-async fn ensure_daemon(name: &str, profile_dir: &Path, addr: &str) -> Result<()> {
+/// Ensure the firefox daemon for `name` is running and reachable. Returns
+/// whether this call spawned it (and so launched the browser with `launch`).
+async fn ensure_daemon(
+    name: &str,
+    profile_dir: &Path,
+    addr: &str,
+    launch: &LaunchConfig,
+) -> Result<bool> {
     let ping = Req {
         op: "ping".into(),
         args: vec![],
         n: 0,
     };
     if ipc::request(addr, &ping).await.is_ok() {
-        return Ok(());
+        return Ok(false);
     }
+    let launch_json = serde_json::to_string(launch)?;
     // Spawn ourselves in daemon mode, detached.
     let exe = std::env::current_exe()?;
     let mut log = std::env::temp_dir();
@@ -278,6 +299,8 @@ async fn ensure_daemon(name: &str, profile_dir: &Path, addr: &str) -> Result<()>
             &profile_dir.to_string_lossy(),
             "--addr",
             addr,
+            "--launch",
+            &launch_json,
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::from(out))
@@ -287,7 +310,7 @@ async fn ensure_daemon(name: &str, profile_dir: &Path, addr: &str) -> Result<()>
     for _ in 0..120 {
         tokio::time::sleep(Duration::from_millis(200)).await;
         if ipc::request(addr, &ping).await.is_ok() {
-            return Ok(());
+            return Ok(true);
         }
     }
     Err(anyhow!(
@@ -317,15 +340,26 @@ impl BackendFactory for FirefoxFactory {
         &self,
         rec: &mut SessionRecord,
         store: &SessionStore,
-        _opts: &Options,
+        opts: &Options,
     ) -> Result<Box<dyn Controller>> {
         let name = rec.target.clone();
         let profile_dir = store.paths(&rec.id)?.dir.join("profile");
         let addr = daemon_addr(&name);
-        ensure_daemon(&name, &profile_dir, &addr).await?;
+        let spawned = ensure_daemon(&name, &profile_dir, &addr, &opts.launch).await?;
         rec.runtime.endpoint = Some(addr.clone());
         rec.runtime.alive = true;
-        rec.config = serde_json::json!({ "port": port_for(&name), "daemon": addr });
+        // Record the launch settings the running browser was started with; a
+        // resumed session keeps the ones it launched under.
+        let launched_with = if spawned {
+            serde_json::to_value(&opts.launch).unwrap_or(serde_json::Value::Null)
+        } else {
+            rec.config.get("launch").cloned().unwrap_or(serde_json::Value::Null)
+        };
+        rec.config = serde_json::json!({
+            "port": port_for(&name),
+            "daemon": addr,
+            "launch": launched_with,
+        });
         Ok(Box::new(FirefoxController {
             addr,
             target: name,

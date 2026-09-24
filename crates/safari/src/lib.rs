@@ -12,6 +12,8 @@
 //! - No in-band upload (`capabilities.upload = false`). For a file `<input>`,
 //!   drive the native picker via the mac backend with `--takeover`. Canonical
 //!   guidance: `app/src/guidance.rs`.
+//! - New windows open at 1360x800 (~1.7:1) unless configured (`Options::launch`,
+//!   applied via WebDriver `window/rect`); headless is not available.
 
 mod launch;
 mod webdriver;
@@ -292,7 +294,7 @@ impl BackendFactory for SafariFactory {
         &self,
         rec: &mut SessionRecord,
         _store: &SessionStore,
-        _opts: &Options,
+        opts: &Options,
     ) -> Result<Box<dyn Controller>> {
         let name = rec.target.clone();
         let port = port_for(&name);
@@ -301,16 +303,26 @@ impl BackendFactory for SafariFactory {
 
         // Reuse a stored, still-alive WebDriver session; else create one.
         let stored = rec.config.get("session_id").and_then(|v| v.as_str()).map(str::to_string);
-        let wd = match stored {
+        let existing = match stored {
             Some(sid) => {
                 let candidate = WdClient::attach(&base, &sid);
-                if candidate.alive().await {
-                    candidate
-                } else {
-                    WdClient::new_session(&base).await?
-                }
+                candidate.alive().await.then_some(candidate)
             }
-            None => WdClient::new_session(&base).await?,
+            None => None,
+        };
+        let created = existing.is_none();
+        let wd = match existing {
+            Some(wd) => wd,
+            None => {
+                let wd = WdClient::new_session(&base).await?;
+                // safaridriver opens the window itself, so geometry is applied
+                // after the fact over WebDriver (headless/args don't apply).
+                let (w, h) = opts.launch.window_size();
+                wd.set_window_rect(w, h, opts.launch.window_position())
+                    .await
+                    .map_err(|e| anyhow!("sizing Safari window: {e}"))?;
+                wd
+            }
         };
 
         rec.runtime.endpoint = Some(base);
@@ -318,7 +330,18 @@ impl BackendFactory for SafariFactory {
         if let Some(p) = pid {
             rec.runtime.pids = vec![p];
         }
-        rec.config = json!({ "port": port, "session_id": wd.session_id() });
+        // Record the launch settings the window was created with; a resumed
+        // session keeps the ones it launched under.
+        let launched_with = if created {
+            serde_json::to_value(&opts.launch).unwrap_or(Value::Null)
+        } else {
+            rec.config.get("launch").cloned().unwrap_or(Value::Null)
+        };
+        rec.config = json!({
+            "port": port,
+            "session_id": wd.session_id(),
+            "launch": launched_with,
+        });
         Ok(Box::new(SafariController { wd, target: name }))
     }
 }

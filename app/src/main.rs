@@ -6,7 +6,7 @@ mod factory;
 mod guidance;
 mod mcp;
 
-use agent_controller_core::{now, Backend, Locator, ScrollDir, SessionStore};
+use agent_controller_core::{now, Backend, ConfigFile, LaunchConfig, Locator, ScrollDir, SessionStore};
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -43,6 +43,19 @@ struct Cli {
     /// ignores targeted events. Default is non-interruptive (CGEventPostToPid).
     #[arg(long, global = true)]
     takeover: bool,
+
+    /// Browser window size on cold start, WIDTHxHEIGHT (e.g. 1360x800).
+    /// Overrides config.toml / env. Default 1360x800 (~1.7:1).
+    #[arg(long, global = true, value_name = "WxH")]
+    window_size: Option<String>,
+
+    /// Browser window position on cold start, X,Y (chrome/safari).
+    #[arg(long, global = true, value_name = "X,Y")]
+    window_position: Option<String>,
+
+    /// Launch the browser headless (chrome/firefox).
+    #[arg(long, global = true)]
+    headless: bool,
 
     /// Emit structured JSON instead of human text.
     #[arg(long, global = true)]
@@ -93,6 +106,9 @@ enum Command {
     /// Manage sessions.
     #[command(subcommand)]
     Session(SessionCmd),
+    /// Show or initialise the user config (browser launch settings).
+    #[command(subcommand)]
+    Config(ConfigCmd),
     /// Internal: run the firefox BiDi daemon (not for direct use).
     #[command(name = "__firefox-daemon", hide = true)]
     FirefoxDaemon {
@@ -102,7 +118,24 @@ enum Command {
         profile: PathBuf,
         #[arg(long)]
         addr: String,
+        /// Resolved launch config as JSON (from the spawning CLI).
+        #[arg(long)]
+        launch: Option<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum ConfigCmd {
+    /// Print the config file path and the effective launch settings per browser
+    /// (file → env → flags).
+    Show,
+    /// Write a commented config.toml template (refuses to overwrite without --force).
+    Init {
+        #[arg(long)]
+        force: bool,
+    },
+    /// Print the config file path.
+    Path,
 }
 
 #[derive(Subcommand)]
@@ -140,6 +173,7 @@ async fn run() -> Result<()> {
     match &cli.command {
         Command::Sessions => return list_sessions(&store, cli.json),
         Command::Session(sub) => return session_cmd(&store, sub, cli.json),
+        Command::Config(sub) => return config_cmd(&store, sub, &cli),
         #[cfg(target_os = "macos")]
         Command::Displays => {
             let displays = agent_controller_mac::displays();
@@ -169,11 +203,17 @@ async fn run() -> Result<()> {
             session,
             profile,
             addr,
+            launch,
         } => {
+            let launch: LaunchConfig = match launch {
+                Some(j) => serde_json::from_str(j)?,
+                None => LaunchConfig::default(),
+            };
             return agent_controller_firefox::run_daemon(
                 session.clone(),
                 profile.clone(),
                 addr.clone(),
+                launch,
             )
             .await;
         }
@@ -187,6 +227,7 @@ async fn run() -> Result<()> {
         session: cli.session.clone(),
         pid: cli.pid,
         takeover: cli.takeover,
+        launch: launch_overrides(&cli)?,
     };
     let (ctrl, id) = factory::create(&store, backend, opts).await?;
 
@@ -284,11 +325,103 @@ async fn run() -> Result<()> {
         }
         Command::Sessions
         | Command::Session(_)
+        | Command::Config(_)
         | Command::Displays
         | Command::Doctor
         | Command::Mcp
         | Command::FirefoxDaemon { .. } => {
             unreachable!("handled above")
+        }
+    }
+    Ok(())
+}
+
+/// The launch-config layer contributed by this invocation's flags.
+fn launch_overrides(cli: &Cli) -> Result<LaunchConfig> {
+    let mut l = LaunchConfig::default();
+    if let Some(s) = &cli.window_size {
+        let (w, h) = LaunchConfig::parse_size(s)?;
+        l.width = Some(w);
+        l.height = Some(h);
+    }
+    if let Some(s) = &cli.window_position {
+        let (x, y) = LaunchConfig::parse_position(s)?;
+        l.x = Some(x);
+        l.y = Some(y);
+    }
+    if cli.headless {
+        l.headless = Some(true);
+    }
+    Ok(l)
+}
+
+fn config_cmd(store: &SessionStore, sub: &ConfigCmd, cli: &Cli) -> Result<()> {
+    let path = ConfigFile::path(store.home());
+    match sub {
+        ConfigCmd::Path => println!("{}", path.display()),
+        ConfigCmd::Init { force } => {
+            if path.exists() && !force {
+                return Err(anyhow::anyhow!(
+                    "{} already exists (use --force to overwrite)",
+                    path.display()
+                ));
+            }
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&path, ConfigFile::template())?;
+            ok(cli.json, &format!("wrote {}", path.display()));
+        }
+        ConfigCmd::Show => {
+            // Validate the file up front so a typo is reported, not masked.
+            ConfigFile::load(store.home())?;
+            let overrides = launch_overrides(cli)?;
+            let browsers = [Backend::Chrome, Backend::Firefox, Backend::Safari];
+            if cli.json {
+                let mut effective = serde_json::Map::new();
+                for b in browsers {
+                    let l = LaunchConfig::resolve(store.home(), b, &overrides)?;
+                    let (w, h) = l.window_size();
+                    let mut v = serde_json::to_value(&l)?;
+                    v["effective_width"] = serde_json::json!(w);
+                    v["effective_height"] = serde_json::json!(h);
+                    effective.insert(b.as_str().to_string(), v);
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "path": path,
+                        "exists": path.exists(),
+                        "launch": effective,
+                    }))?
+                );
+                return Ok(());
+            }
+            println!(
+                "config: {} ({})",
+                path.display(),
+                if path.exists() { "present" } else { "absent — using defaults; `config init` to create" }
+            );
+            println!("effective launch settings (file → env → flags):");
+            for b in browsers {
+                let l = LaunchConfig::resolve(store.home(), b, &overrides)?;
+                let (w, h) = l.window_size();
+                let pos = l
+                    .window_position()
+                    .map(|(x, y)| format!("  position={x},{y}"))
+                    .unwrap_or_default();
+                let args = if l.args.is_empty() {
+                    String::new()
+                } else {
+                    format!("  args={:?}", l.args)
+                };
+                println!(
+                    "  {:<8} window={w}x{h} ({:.2}:1){pos}  headless={}{args}",
+                    b.as_str(),
+                    w as f64 / h as f64,
+                    l.is_headless()
+                );
+            }
         }
     }
     Ok(())

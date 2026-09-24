@@ -75,7 +75,16 @@ abstracted so every target inherits a common interface.
 ## Tooling shipped
 
 - **CLI:** `use/snapshot/click/type/press/scroll/screenshot/menu/status` +
-  `sessions`, `session show|rm|path|prune`, `displays`, `doctor`, `mcp`.
+  `sessions`, `session show|rm|path|prune`, `config show|init|path`, `displays`,
+  `doctor`, `mcp`.
+- **Browser launch config:** `core::config::LaunchConfig` (width/height/x/y/
+  headless/args), layered `<home>/config.toml` (`[launch]`, `[launch.<backend>]`)
+  → env → `--window-size`/`--window-position`/`--headless` (MCP `window_size`/
+  `headless`). Default 1360x800 (~1.7:1); one dimension derives the other at that
+  ratio. Resolved once in `factory::create` into `Options.launch`; applied on
+  cold start only (chrome: `--window-size` + CDP `setWindowBounds`; firefox:
+  `--width/--height` via the daemon's `--launch` arg; safari: WebDriver
+  `window/rect`). `session.json` `config.launch` records what a browser started with.
 - **MCP server:** `agent-controller mcp` (stdio) exposes the 7 verbs as tools
   (each takes a `backend` arg). Registered with Claude Code at user scope
   (`claude mcp add agent-controller -- agent-controller mcp`). No re-registration

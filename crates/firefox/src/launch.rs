@@ -3,6 +3,7 @@
 //! endpoint: we start the browser with `--remote-debugging-port`, then read the
 //! `WebDriver BiDi listening on ws://...` line the remote agent prints to stderr.
 
+use agent_controller_core::LaunchConfig;
 use anyhow::{anyhow, Context, Result};
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -63,15 +64,16 @@ pub fn find_firefox() -> Option<String> {
     None
 }
 
-/// Launch Firefox with the remote agent on `port` and a fresh profile, then wait
-/// until the remote agent is accepting connections on that port.
+/// Launch Firefox with the remote agent on `port` and a fresh profile, sized
+/// per `launch`, then wait until the remote agent is accepting connections on
+/// that port.
 ///
 /// Discovery is deterministic — `ws://127.0.0.1:<port>/session` — rather than
 /// parsed from stderr. On macOS the `firefox` launcher closes its inherited
 /// stderr shortly after startup (the browser keeps running), so an stderr EOF is
 /// not a reliable "exited" signal. We poll the TCP port instead, only treating an
 /// actual process exit as failure.
-pub async fn launch(port: u16, headless: bool, profile_dir: PathBuf) -> Result<LaunchedFirefox> {
+pub async fn launch(port: u16, launch: &LaunchConfig, profile_dir: PathBuf) -> Result<LaunchedFirefox> {
     let bin = find_firefox()
         .ok_or_else(|| anyhow!("Firefox not found. Set $FIREFOX_BIN or install Firefox."))?;
 
@@ -92,9 +94,17 @@ pub async fn launch(port: u16, headless: bool, profile_dir: PathBuf) -> Result<L
         .arg(&profile_dir)
         .arg("--no-remote")
         .arg("--new-instance");
-    if headless {
+    // Window geometry: Firefox takes `--width`/`--height` (no launch-time
+    // position flag exists, so `x`/`y` are ignored here).
+    let (w, h) = launch.window_size();
+    cmd.arg("--width")
+        .arg(w.to_string())
+        .arg("--height")
+        .arg(h.to_string());
+    if launch.is_headless() {
         cmd.arg("--headless");
     }
+    cmd.args(&launch.args);
     cmd.stdout(Stdio::null()).stderr(Stdio::piped());
     cmd.kill_on_drop(false);
 

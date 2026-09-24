@@ -54,16 +54,22 @@ restarting that Firefox process.
 in-band, no OS picker, no focus stealing, works even on a background tab. Do not \
 try to open the native dialog.
 - @ref ids are data-abf-ref DOM attributes; re-snapshot after navigation or a \
-re-render.",
+re-render.
+- Windows cold-start at 1360x800 (~1.7:1) unless configured (config.toml, \
+`window_size`/`headless` args); a running browser is not resized.",
 
         Backend::Chrome => "chrome — Chrome DevTools Protocol (CDP); no daemon (transient connections per session).
 - File upload: `upload @ref <absolute path>` (CDP DOM.setFileInputFiles) — \
 in-band, no OS picker, no focus stealing.
-- Same stale-@ref rule: re-snapshot before acting after the page changes.",
+- Same stale-@ref rule: re-snapshot before acting after the page changes.
+- Windows cold-start at 1360x800 (~1.7:1) unless configured (config.toml, \
+`window_size`/`headless` args); a running browser is not resized.",
 
         Backend::Safari => "safari — safaridriver (W3C WebDriver). Requires Remote Automation enabled (run `doctor`).
 - No in-band upload verb yet (capabilities.upload = false). For a file <input>, \
-fall back to the mac backend's native-dialog route with `takeover`.",
+fall back to the mac backend's native-dialog route with `takeover`.
+- New windows open at 1360x800 (~1.7:1) unless configured (config.toml, \
+`window_size` arg); headless is not available.",
 
         Backend::IosSim => "ios-sim — a booted iOS Simulator via idb_companion.
 - Coordinates are logical points, and screenshots are downscaled to that same \

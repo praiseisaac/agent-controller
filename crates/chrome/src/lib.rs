@@ -8,14 +8,16 @@
 //! - Upload files with `upload @ref <abs path>` (CDP `DOM.setFileInputFiles`):
 //!   in-band, no OS picker, no focus stealing.
 //! - Re-snapshot after the page changes; stale `@ref`s fail with "no element".
+//! - Windows cold-start at 1360x800 (~1.7:1) unless configured
+//!   (`Options::launch`); a running Chrome is not resized.
 //!   Canonical guidance: `app/src/guidance.rs`.
 
 mod cdp;
 mod launch;
 
 use agent_controller_core::{
-    anyhow, Backend, BackendFactory, Capabilities, Controller, Element, Identity, Image, Locator,
-    Options, Rect, Result, ScrollDir, SessionRecord, SessionStore, Snapshot,
+    anyhow, Backend, BackendFactory, Capabilities, Controller, Element, Identity, Image,
+    LaunchConfig, Locator, Options, Rect, Result, ScrollDir, SessionRecord, SessionStore, Snapshot,
 };
 use async_trait::async_trait;
 use base64::Engine;
@@ -364,7 +366,7 @@ impl BackendFactory for ChromeFactory {
         &self,
         rec: &mut SessionRecord,
         store: &SessionStore,
-        _opts: &Options,
+        opts: &Options,
     ) -> Result<Box<dyn Controller>> {
         let name = rec.target.clone();
         let port = port_for(&name);
@@ -376,18 +378,58 @@ impl BackendFactory for ChromeFactory {
             None
         } else {
             let profile_dir = store.paths(&rec.id)?.dir.join("profile");
-            launch::launch(port, profile_dir).await?
+            launch::launch(port, profile_dir, &opts.launch).await?
         };
         let ws = launch::page_ws(port).await?;
         let cdp = CdpClient::connect(&ws).await?;
         // Page domain enables navigation lifecycle/screenshots.
         let _ = cdp.send("Page.enable", json!({})).await;
+        if !running {
+            // `--window-size` sets the initial bounds, but a profile's saved
+            // window state can win on some platforms; pin them over CDP too.
+            set_window_bounds(&cdp, &opts.launch).await?;
+        }
         rec.runtime.endpoint = Some(ws);
         rec.runtime.alive = true;
         if let Some(p) = pid {
             rec.runtime.pids = vec![p];
         }
-        rec.config = json!({ "port": port });
+        // Record the launch settings the running browser was started with; a
+        // resumed session keeps the ones it launched under.
+        let launched_with = if running {
+            rec.config.get("launch").cloned().unwrap_or(serde_json::Value::Null)
+        } else {
+            serde_json::to_value(&opts.launch).unwrap_or(serde_json::Value::Null)
+        };
+        rec.config = json!({ "port": port, "launch": launched_with });
         Ok(Box::new(ChromeController { cdp, target: name }))
     }
+}
+
+/// Apply the configured window geometry to the page's window over CDP
+/// (`Browser.setWindowBounds`). Headless Chrome has no window; skip it there.
+async fn set_window_bounds(cdp: &CdpClient, launch: &LaunchConfig) -> Result<()> {
+    if launch.is_headless() {
+        return Ok(());
+    }
+    let win = cdp
+        .send("Browser.getWindowForTarget", json!({}))
+        .await
+        .map_err(|e| anyhow!("looking up Chrome window: {e}"))?;
+    let Some(window_id) = win.get("windowId").cloned() else {
+        return Ok(());
+    };
+    let (w, h) = launch.window_size();
+    let mut bounds = json!({ "windowState": "normal", "width": w, "height": h });
+    if let Some((x, y)) = launch.window_position() {
+        bounds["left"] = json!(x);
+        bounds["top"] = json!(y);
+    }
+    cdp.send(
+        "Browser.setWindowBounds",
+        json!({ "windowId": window_id, "bounds": bounds }),
+    )
+    .await
+    .map_err(|e| anyhow!("sizing Chrome window: {e}"))?;
+    Ok(())
 }

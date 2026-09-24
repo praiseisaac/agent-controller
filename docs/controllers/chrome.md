@@ -41,6 +41,21 @@ reuses a running Chrome on that port (checked via `GET /json/version`) or launch
 one. `@ref`s are the page's `data-abf-ref` attributes. `runtime.endpoint` is the
 page WebSocket URL.
 
+## Launch settings
+
+On cold start the window is sized per the shared launch config (see
+[session-management.md](../session-management.md#user-config-configtoml)):
+default **1360x800**, a ~1.7:1 landscape window. Chrome gets
+`--window-size=W,H` (plus `--window-position=X,Y` when set and `--headless=new`
+when headless), and the bounds are pinned again over CDP
+(`Browser.setWindowBounds`) right after launch. Extra `args` are appended to the
+command line. A running Chrome is never resized on resume.
+
+```sh
+agent-controller --backend chrome --window-size 1600x900 use example.com
+agent-controller --backend chrome --headless --session ci use example.com
+```
+
 ## Capabilities
 
 | eval | network | menus | coordinates | screenshot |
