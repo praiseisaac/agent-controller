@@ -34,7 +34,11 @@ From a checkout:
 ./install.sh                  # build (release) + install to ~/bin
 PREFIX=/usr/local/bin ./install.sh
 agent-controller doctor       # check/grant per-backend permissions
+agent-controller --version    # what's installed: semver (git commit, build date)
 ```
+
+Releases are tagged `vX.Y.Z`; see [CHANGELOG.md](CHANGELOG.md). Pin one with
+`AGENT_CONTROLLER_REF=v0.2.0` when running the one-liner.
 
 ### Windows
 

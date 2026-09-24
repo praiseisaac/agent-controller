@@ -11,7 +11,11 @@ Clones the repo, builds, and installs to `~/bin`:
 curl -fsSL https://raw.githubusercontent.com/praiseisaac/agent-controller/main/install.sh | bash
 # also brew-install missing build/runtime deps (protoc, idb-companion):
 curl -fsSL https://raw.githubusercontent.com/praiseisaac/agent-controller/main/install.sh | bash -s -- --install-deps
+# pin a released version (git tag) instead of main:
+curl -fsSL https://raw.githubusercontent.com/praiseisaac/agent-controller/main/install.sh | AGENT_CONTROLLER_REF=v0.2.0 bash
 ```
+
+Releases are tagged `vX.Y.Z` and listed in [CHANGELOG.md](../CHANGELOG.md).
 
 ---
 
@@ -93,16 +97,23 @@ export PATH="$HOME/bin:$PATH"     # add to ~/.zshrc
 ### 5. Verify
 
 ```sh
+agent-controller --version       # e.g. 0.2.0 (a84d9d55e, 2026-09-24) — the commit + build date of the installed binary
 agent-controller --help
 agent-controller doctor          # checks/guides macOS permissions
 agent-controller displays
 ```
 
+`agent-controller version --json` prints the same as a record (version, git,
+build date, os/arch); a `-dirty` suffix on the commit means the binary was built
+from a tree with uncommitted changes.
+
 ---
 
 ## Updating / reinstalling
 
-Always remove the old binary before copying a new one (or just use `install.sh`):
+Check what is installed with `agent-controller --version`, then rebuild and
+reinstall. Always remove the old binary before copying a new one (or just use
+`install.sh`):
 
 ```sh
 pkill -f __firefox-daemon          # release the mapped binary, if a daemon is up

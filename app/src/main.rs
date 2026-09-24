@@ -11,8 +11,28 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
+/// Semantic version from the workspace `Cargo.toml`.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Git commit (short sha, `-dirty` if the tree had changes) captured by `build.rs`.
+pub const GIT_DESC: &str = env!("AGENT_CONTROLLER_GIT_DESC");
+/// Build date (UTC, `YYYY-MM-DD`) captured by `build.rs`.
+pub const BUILD_DATE: &str = env!("AGENT_CONTROLLER_BUILD_DATE");
+/// `0.2.0 (abc123def, 2026-09-24)` — what `--version` and `version` print.
+pub const LONG_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("AGENT_CONTROLLER_GIT_DESC"),
+    ", ",
+    env!("AGENT_CONTROLLER_BUILD_DATE"),
+    ")"
+);
+
 #[derive(Parser)]
-#[command(name = "agent-controller", about = "Drive apps/devices for agents")]
+#[command(
+    name = "agent-controller",
+    about = "Drive apps/devices for agents",
+    version = LONG_VERSION
+)]
 struct Cli {
     /// Backend to use.
     #[arg(long, default_value = "ios-sim", global = true)]
@@ -109,6 +129,8 @@ enum Command {
     /// Show or initialise the user config (browser launch settings).
     #[command(subcommand)]
     Config(ConfigCmd),
+    /// Print the version, git commit, build date, and platform (`--json` for a record).
+    Version,
     /// Internal: run the firefox BiDi daemon (not for direct use).
     #[command(name = "__firefox-daemon", hide = true)]
     FirefoxDaemon {
@@ -174,6 +196,7 @@ async fn run() -> Result<()> {
         Command::Sessions => return list_sessions(&store, cli.json),
         Command::Session(sub) => return session_cmd(&store, sub, cli.json),
         Command::Config(sub) => return config_cmd(&store, sub, &cli),
+        Command::Version => return version_cmd(cli.json),
         #[cfg(target_os = "macos")]
         Command::Displays => {
             let displays = agent_controller_mac::displays();
@@ -311,7 +334,7 @@ async fn run() -> Result<()> {
             if cli.json {
                 println!(
                     "{}",
-                    serde_json::json!({"backend": backend.as_str(), "session": id, "target": ctrl.target(), "capabilities": caps})
+                    serde_json::json!({"backend": backend.as_str(), "session": id, "target": ctrl.target(), "capabilities": caps, "version": VERSION})
                 );
             } else {
                 println!(
@@ -326,12 +349,38 @@ async fn run() -> Result<()> {
         Command::Sessions
         | Command::Session(_)
         | Command::Config(_)
+        | Command::Version
         | Command::Displays
         | Command::Doctor
         | Command::Mcp
         | Command::FirefoxDaemon { .. } => {
             unreachable!("handled above")
         }
+    }
+    Ok(())
+}
+
+/// Build provenance as a JSON record (also the shape `version --json` prints).
+pub fn version_info() -> serde_json::Value {
+    serde_json::json!({
+        "name": "agent-controller",
+        "version": VERSION,
+        "git": GIT_DESC,
+        "build_date": BUILD_DATE,
+        "os": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+    })
+}
+
+fn version_cmd(json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(&version_info())?);
+    } else {
+        println!(
+            "agent-controller {LONG_VERSION} {}-{}",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        );
     }
     Ok(())
 }

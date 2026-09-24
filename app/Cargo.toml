@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+build = "build.rs"
+
 [[bin]]
 name = "agent-controller"
 path = "src/main.rs"

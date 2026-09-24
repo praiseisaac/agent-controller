@@ -41,6 +41,28 @@ agent-controller doctor     # check macOS permissions
 - Add/update the backend's doc under `docs/controllers/` and the tables in
   `README.md` and `docs/README.md`.
 
+## Releasing
+
+Versions are semver, set once in the workspace `Cargo.toml`
+(`[workspace.package] version`) and inherited by every crate. `build.rs` in
+`app/` stamps the git commit and build date into the binary, so
+`agent-controller --version` identifies exactly what is installed.
+
+1. Move the `[Unreleased]` notes in `CHANGELOG.md` under a new
+   `## [X.Y.Z] - YYYY-MM-DD` heading and update the compare links at the bottom.
+2. Bump `version` in the root `Cargo.toml`; run `cargo build` so `Cargo.lock`
+   follows.
+3. Commit as `Release vX.Y.Z`, merge to `main`, then tag and push the tag:
+   ```sh
+   git tag -a vX.Y.Z -m "agent-controller vX.Y.Z"
+   git push origin vX.Y.Z
+   ```
+4. Users install a tagged version with
+   `AGENT_CONTROLLER_REF=vX.Y.Z` (see [docs/install.md](docs/install.md)).
+
+Pre-1.0, a minor bump may include breaking CLI/MCP changes; call them out under
+a `### Changed` or `### Removed` heading.
+
 ## Verifying a change
 
 Prefer driving a real target end-to-end (`use` → `snapshot` → `click` →

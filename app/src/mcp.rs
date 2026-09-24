@@ -37,7 +37,12 @@ pub async fn serve() -> Result<()> {
                 json!({
                     "protocolVersion": PROTOCOL_VERSION,
                     "capabilities": { "tools": {} },
-                    "serverInfo": { "name": "agent-controller", "version": env!("CARGO_PKG_VERSION") },
+                    "serverInfo": {
+                        "name": "agent-controller",
+                        "version": crate::VERSION,
+                        "git": crate::GIT_DESC,
+                        "build_date": crate::BUILD_DATE
+                    },
                     // Operating guidance the client can show the model up front; the
                     // `guidance` tool returns per-backend detail on demand.
                     "instructions": format!(
