@@ -76,7 +76,12 @@ abstracted so every target inherits a common interface.
 
 - **CLI:** `use/snapshot/click/type/press/scroll/screenshot/menu/status` +
   `sessions`, `session show|rm|path|prune`, `config show|init|path`, `displays`,
-  `doctor`, `mcp`.
+  `doctor`, `mcp`, `version`.
+- **Versioning:** semver in the workspace `Cargo.toml` (0.2.0), `app/build.rs`
+  stamps git sha (+`-dirty`) and build date (`SOURCE_DATE_EPOCH` honoured);
+  `--version`/`version --json`/`status --json`/MCP `serverInfo` expose it.
+  `CHANGELOG.md` (Keep a Changelog), tags `vX.Y.Z`, release steps in
+  `CONTRIBUTING.md`; `install.sh` pins a tag via `AGENT_CONTROLLER_REF`.
 - **Browser launch config:** `core::config::LaunchConfig` (width/height/x/y/
   headless/args), layered `<home>/config.toml` (`[launch]`, `[launch.<backend>]`)
   → env → `--window-size`/`--window-position`/`--headless` (MCP `window_size`/

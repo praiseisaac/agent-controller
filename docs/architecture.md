@@ -125,5 +125,5 @@ agent-controller [--backend B] [--session N] [--udid U] [--app A] [--home D] [--
                  [--window-size WxH] [--window-position X,Y] [--headless] <cmd>
   use <target> · snapshot · click <loc> · type <text> · press <key>
   scroll <dir> [amount] · screenshot [path] · menu <path> · status
-  sessions · session show|rm|path|prune · config show|init|path · displays · doctor · mcp
+  sessions · session show|rm|path|prune · config show|init|path · displays · doctor · mcp · version
 ```
