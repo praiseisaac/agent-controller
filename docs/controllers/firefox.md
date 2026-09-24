@@ -48,6 +48,21 @@ under the session dir. Multiple named instances coexist
 attributes (persist in the live DOM across invocations), so no `refs.json` cache.
 `runtime.endpoint` is the daemon socket.
 
+## Launch settings
+
+On cold start the window is sized per the shared launch config (see
+[session-management.md](../session-management.md#user-config-configtoml)):
+default **1360x800**, a ~1.7:1 landscape window. The CLI resolves the settings
+and hands them to the daemon (`--launch <json>`), which launches Firefox with
+`--width W --height H` (and `--headless` when headless) plus any extra `args`.
+Firefox has no launch-time position flag, so `x`/`y` are ignored. A running
+Firefox is never resized on resume.
+
+```sh
+agent-controller --backend firefox --window-size 1600x900 use example.com
+agent-controller --backend firefox --headless --session ci use example.com
+```
+
 ## Capabilities
 
 | eval | network | menus | coordinates | screenshot |

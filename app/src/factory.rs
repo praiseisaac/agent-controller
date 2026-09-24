@@ -6,7 +6,8 @@
 use agent_controller_android_emu::AndroidEmuFactory;
 use agent_controller_chrome::ChromeFactory;
 use agent_controller_core::{
-    anyhow, Backend, BackendFactory, Controller, Options, Result, SessionRecord, SessionStore,
+    anyhow, Backend, BackendFactory, Controller, LaunchConfig, Options, Result, SessionRecord,
+    SessionStore,
 };
 use agent_controller_firefox::FirefoxFactory;
 #[cfg(target_os = "macos")]
@@ -42,12 +43,17 @@ pub fn registry(backend: Backend) -> Result<Box<dyn BackendFactory>> {
 
 /// Open (resume or cold-start) the session for `backend`+`opts`, persisting the
 /// record. Returns the controller and the resolved session id.
+///
+/// `opts.launch` arrives as this invocation's overrides and leaves as the
+/// effective launch settings (config file → env → overrides), so backends
+/// never consult the file or environment themselves.
 pub async fn create(
     store: &SessionStore,
     backend: Backend,
-    opts: Options,
+    mut opts: Options,
 ) -> Result<(Box<dyn Controller>, String)> {
     let factory = registry(backend)?;
+    opts.launch = LaunchConfig::resolve(store.home(), backend, &opts.launch)?;
     let ident = factory.identify(&opts).await?;
     let mut rec = store
         .load(&ident.id)?

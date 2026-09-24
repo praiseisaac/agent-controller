@@ -1,6 +1,6 @@
 //! Launch Chrome with CDP enabled and discover a page target's WebSocket URL.
 
-use agent_controller_core::{anyhow, Result};
+use agent_controller_core::{anyhow, LaunchConfig, Result};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -55,20 +55,30 @@ pub fn find_chrome() -> Option<String> {
         .map(|p| p.to_string())
 }
 
-/// Launch Chrome with `--remote-debugging-port` and an isolated profile, then
-/// wait until the CDP HTTP endpoint is up. Left running after this process exits.
-pub async fn launch(port: u16, profile_dir: PathBuf) -> Result<Option<u32>> {
+/// Launch Chrome with `--remote-debugging-port` and an isolated profile, sized
+/// per `launch`, then wait until the CDP HTTP endpoint is up. Left running
+/// after this process exits.
+pub async fn launch(port: u16, profile_dir: PathBuf, launch: &LaunchConfig) -> Result<Option<u32>> {
     let bin = find_chrome()
         .ok_or_else(|| anyhow!("Chrome not found. Set $CHROME_BIN or install Google Chrome."))?;
     std::fs::create_dir_all(&profile_dir).ok();
 
+    let (w, h) = launch.window_size();
     let mut cmd = Command::new(&bin);
     cmd.arg(format!("--remote-debugging-port={port}"))
         .arg(format!("--user-data-dir={}", profile_dir.display()))
         .arg("--no-first-run")
         .arg("--no-default-browser-check")
         .arg("--remote-allow-origins=*")
-        .arg("about:blank")
+        .arg(format!("--window-size={w},{h}"));
+    if let Some((x, y)) = launch.window_position() {
+        cmd.arg(format!("--window-position={x},{y}"));
+    }
+    if launch.is_headless() {
+        cmd.arg("--headless=new");
+    }
+    cmd.args(&launch.args);
+    cmd.arg("about:blank")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());

@@ -5,15 +5,20 @@
 use crate::bidi::{BidiClient, BidiSession};
 use crate::ensure;
 use crate::ipc::{Req, Resp};
-use agent_controller_core::{anyhow, Result};
+use agent_controller_core::{anyhow, LaunchConfig, Result};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 /// Run the daemon to completion (until a `close` request or socket error).
-pub async fn run(name: String, profile_dir: PathBuf, addr: String) -> Result<()> {
-    let (ws, _pid) = ensure(&name, profile_dir).await?;
+pub async fn run(
+    name: String,
+    profile_dir: PathBuf,
+    addr: String,
+    launch: LaunchConfig,
+) -> Result<()> {
+    let (ws, _pid) = ensure(&name, profile_dir, &launch).await?;
     let client = BidiClient::connect(&format!("{ws}/session"))
         .await
         .map_err(|e| anyhow!("connecting BiDi: {e}"))?;

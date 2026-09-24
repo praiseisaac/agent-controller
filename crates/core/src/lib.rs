@@ -8,7 +8,9 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+pub mod config;
 pub mod session;
+pub use config::{ConfigFile, LaunchConfig};
 pub use session::{now, SessionPaths, SessionRecord, SessionStore};
 
 pub use anyhow::{anyhow, Error, Result};
@@ -229,6 +231,10 @@ pub struct Options {
     /// Use the global cursor / focus-stealing input path (mac) instead of the
     /// non-interruptive targeted path.
     pub takeover: bool,
+    /// Browser launch overrides from this invocation (CLI flags / MCP args).
+    /// The factory resolves these over the config file + env into the
+    /// effective settings before `open`; browsers apply them on cold start.
+    pub launch: LaunchConfig,
 }
 
 /// The resolved identity of a session: its id plus the concrete target.

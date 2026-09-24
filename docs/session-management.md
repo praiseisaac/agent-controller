@@ -87,7 +87,42 @@ to drift.
 ```
 
 `config` is an opaque `serde_json::Value` to core — each backend defines its shape
-(ios-sim: gRPC port; browsers: profile dir, debug port, headless; mac: pid/bundle).
+(ios-sim: gRPC port; browsers: debug port plus the `launch` settings the running
+browser was started with; mac: pid/bundle).
+
+## User config (`config.toml`)
+
+`<home>/config.toml` (next to `sessions/`) holds user settings; today that is
+browser **launch settings**: the window geometry, headless mode, and extra
+command-line args a browser is cold-started with (chrome, firefox, safari).
+`agent-controller config init` writes a commented template, `config show` prints
+the effective values per browser, `config path` prints the location.
+
+```toml
+[launch]            # every browser
+width = 1360        # default 1360x800 — a ~1.7:1 landscape window
+height = 800        # set only one and the other is derived at that ratio
+# x = 0             # position (chrome/safari; firefox ignores)
+# y = 0
+# headless = false  # chrome/firefox; safari cannot
+# args = []         # extra browser CLI args (chrome/firefox)
+
+[launch.chrome]     # per-backend overrides, same keys; args concatenate
+args = ["--disable-gpu"]
+[launch.firefox]
+headless = true
+```
+
+Precedence, lowest to highest: built-in defaults → `[launch]` → `[launch.<backend>]`
+→ env (`AGENT_CONTROLLER_WINDOW_SIZE=WxH`, `AGENT_CONTROLLER_WINDOW_POSITION=X,Y`,
+`AGENT_CONTROLLER_HEADLESS=1`) → per-call flags (`--window-size`,
+`--window-position`, `--headless`; MCP `window_size` / `headless` args). The
+factory resolves this once per invocation into `Options.launch`, so backends
+never read the file or environment. Unknown keys are an error, not ignored.
+
+Launch settings apply only when a browser is **cold-started**; a resumed session
+keeps its running window as-is (its `session.json` records the `launch` values
+it started under).
 
 ## Artifacts are filed per session
 

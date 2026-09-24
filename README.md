@@ -177,6 +177,29 @@ claude mcp add agent-controller -- agent-controller mcp
 Then ask Claude to, e.g., "snapshot the ios-sim and tap Settings", or "open
 example.com in chrome and screenshot it".
 
+## Browser launch settings
+
+Browsers (chrome, firefox, safari) cold-start in a **1360x800** window — a ~1.7:1
+landscape shape — by default. Configure it in `~/.agent-controller/config.toml`
+(`agent-controller config init` writes a commented template; `config show`
+prints the effective values):
+
+```toml
+[launch]            # every browser
+width = 1600        # set only one and the other is derived at ~1.7:1
+height = 900
+# headless = false  # chrome/firefox
+# args = []         # extra browser CLI args (chrome/firefox)
+[launch.firefox]    # per-backend overrides
+headless = true
+```
+
+Env vars (`AGENT_CONTROLLER_WINDOW_SIZE=WxH`, `AGENT_CONTROLLER_HEADLESS=1`) and
+flags (`--window-size 1600x900`, `--window-position 0,0`, `--headless`; MCP
+`window_size` / `headless` args) override the file. Settings apply on cold start
+only; a running browser is never resized. Details:
+[docs/session-management.md](docs/session-management.md#user-config-configtoml).
+
 ## Safari backend
 
 Drives Safari via `safaridriver` (W3C WebDriver over HTTP). safaridriver is the

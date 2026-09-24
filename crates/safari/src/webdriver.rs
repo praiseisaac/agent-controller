@@ -135,6 +135,21 @@ impl WdClient {
             .ok_or_else(|| anyhow!("screenshot returned no data"))
     }
 
+    /// Set the window's size (and, when given, position) — `POST /window/rect`.
+    pub async fn set_window_rect(
+        &self,
+        width: u32,
+        height: u32,
+        position: Option<(i32, i32)>,
+    ) -> Result<()> {
+        let mut rect = json!({ "width": width, "height": height });
+        if let Some((x, y)) = position {
+            rect["x"] = json!(x);
+            rect["y"] = json!(y);
+        }
+        self.post("/window/rect", rect).await.map(|_| ())
+    }
+
     /// Send a key-input action sequence (Actions API).
     pub async fn key_actions(&self, actions: Value) -> Result<()> {
         self.post(

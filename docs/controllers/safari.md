@@ -46,6 +46,20 @@ busy-session error) and prints the enable instructions when it's off.
 alive; otherwise a new session (and Safari window) is created. `@ref`s are the
 page's `data-abf-ref` attributes.
 
+## Launch settings
+
+When a new WebDriver session (and so a new Safari window) is created, the window
+is sized per the shared launch config (see
+[session-management.md](../session-management.md#user-config-configtoml)):
+default **1360x800**, a ~1.7:1 landscape window, applied via
+`POST /session/{id}/window/rect` (with `x`/`y` when set). safaridriver owns the
+launch, so `headless` and `args` do not apply to Safari. An existing session's
+window is never resized on resume.
+
+```sh
+agent-controller --backend safari --window-size 1600x900 use example.com
+```
+
 ## Capabilities
 
 | eval | network | menus | coordinates | screenshot |
