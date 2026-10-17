@@ -107,6 +107,12 @@ agent-controller displays
 build date, os/arch); a `-dirty` suffix on the commit means the binary was built
 from a tree with uncommitted changes.
 
+A build from source vendored into another repository sets
+`AGENT_CONTROLLER_BUILD_SHA=<commit>`. Without it, `git` would read the host
+repository's commit. With it, `git` is not asked at all, and the binary reports
+that commit (shortened to 9 digits, never with `-dirty`). Anything but 7-40
+lowercase hex digits fails the build.
+
 ---
 
 ## Updating / reinstalling

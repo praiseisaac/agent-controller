@@ -9,6 +9,12 @@ The running binary reports its version with `agent-controller --version`
 
 ## [Unreleased]
 
+### Added
+- **`AGENT_CONTROLLER_BUILD_SHA`.** A build of source vendored into another
+  repository names its commit with this variable. `git` is not asked, so the
+  binary reports the vendored commit, not the host repository's. Anything but
+  7-40 lowercase hex digits fails the build.
+
 ## [0.2.0] - 2026-09-24
 
 ### Added

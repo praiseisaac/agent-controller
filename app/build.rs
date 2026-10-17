@@ -28,22 +28,44 @@ fn civil_date(secs: u64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
-fn main() {
-    // Re-run when HEAD moves (commit/checkout) so the sha stays accurate.
-    if let Some(dir) = git(&["rev-parse", "--git-dir"]) {
-        println!("cargo:rerun-if-changed={dir}/HEAD");
-        println!("cargo:rerun-if-changed={dir}/refs/heads");
-        println!("cargo:rerun-if-changed={dir}/packed-refs");
+/// The commit named by `AGENT_CONTROLLER_BUILD_SHA`, shortened like `git rev-parse --short=9`.
+/// A build from source vendored into another repository sets it: there `git` would read the
+/// host repository's commit, not this one's. Anything but 7–40 lowercase hex digits stops the
+/// build, so a typo never ships as a version.
+fn override_sha(value: &str) -> String {
+    let ok = (7..=40).contains(&value.len())
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    if !ok {
+        panic!("AGENT_CONTROLLER_BUILD_SHA must be a commit sha (7-40 lowercase hex digits), got {value:?}");
     }
+    value[..value.len().min(9)].to_string()
+}
 
-    let sha = git(&["rev-parse", "--short=9", "HEAD"]).unwrap_or_else(|| "unknown".into());
-    let dirty = git(&["status", "--porcelain", "--untracked-files=no"]).is_some();
-    let git_desc = if sha == "unknown" {
-        sha
-    } else if dirty {
-        format!("{sha}-dirty")
-    } else {
-        sha
+fn main() {
+    println!("cargo:rerun-if-env-changed=AGENT_CONTROLLER_BUILD_SHA");
+    let git_desc = match std::env::var("AGENT_CONTROLLER_BUILD_SHA") {
+        // named by whoever builds: git is not asked at all (and no "-dirty": the builder vouches for the tree)
+        Ok(sha) => override_sha(&sha),
+        Err(_) => {
+            // Re-run when HEAD moves (commit/checkout) so the sha stays accurate.
+            if let Some(dir) = git(&["rev-parse", "--git-dir"]) {
+                println!("cargo:rerun-if-changed={dir}/HEAD");
+                println!("cargo:rerun-if-changed={dir}/refs/heads");
+                println!("cargo:rerun-if-changed={dir}/packed-refs");
+            }
+
+            let sha = git(&["rev-parse", "--short=9", "HEAD"]).unwrap_or_else(|| "unknown".into());
+            let dirty = git(&["status", "--porcelain", "--untracked-files=no"]).is_some();
+            if sha == "unknown" {
+                sha
+            } else if dirty {
+                format!("{sha}-dirty")
+            } else {
+                sha
+            }
+        }
     };
 
     // SOURCE_DATE_EPOCH makes reproducible builds possible.
