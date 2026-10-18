@@ -313,4 +313,42 @@ mod tests {
             "the probe is gated on the plan"
         );
     }
+
+    /// The two reads the no-prompt path reaches stay reads: `setup.rs`'s `ax_trusted` and
+    /// `screen_recording_ok` make exactly their preflight call and nothing else, and the glue
+    /// calls exactly those two (fleet's SECAUDIT, advisory on #4).
+    #[test]
+    fn the_preflight_reads_stay_preflight() {
+        let setup = include_str!("../../crates/mac/src/setup.rs");
+        let body = |name: &str| -> String {
+            let start = setup
+                .find(&format!("pub fn {name}() -> bool {{"))
+                .unwrap_or_else(|| panic!("setup.rs has no {name}"));
+            let rest = &setup[start..];
+            rest[..rest.find("\n}\n").expect("its body ends") + 2].to_string()
+        };
+        for (name, call) in [
+            ("ax_trusted", "AXIsProcessTrusted()"),
+            ("screen_recording_ok", "ScreenCaptureAccess.preflight()"),
+        ] {
+            let b = body(name);
+            assert!(b.contains(call), "{name} no longer makes {call}: {b}");
+            for bad in ["WithOptions", "request", "Prompt", "open", "Command"] {
+                assert!(!b.contains(bad), "{name} names {bad}: {b}");
+            }
+            // one expression, the read: no statement before or after it
+            assert_eq!(b.matches(';').count(), 0, "{name} does more than the read: {b}");
+        }
+        let main = include_str!("main.rs");
+        let glue = main
+            .split("// ── doctor --no-prompt ──")
+            .nth(1)
+            .expect("main.rs marks the no-prompt glue")
+            .split("// ── end doctor --no-prompt ──")
+            .next()
+            .unwrap();
+        for f in ["setup::ax_trusted()", "setup::screen_recording_ok()"] {
+            assert!(glue.contains(f), "the no-prompt glue no longer reads through {f}");
+        }
+    }
 }
