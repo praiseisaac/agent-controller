@@ -22,10 +22,15 @@ The running binary reports its version with `agent-controller --version`
   a closed list that touches no grant (`version`, `sessions`, `session`,
   `config`), so the grant is agent-controller's own, at its own path. A call
   added later disclaims too, unless it is added to that list. The decision is fixed when the binary
-  is built, never at run time. The loop guard is the state itself: a re-run that
-  is still not responsible for itself, or a caller that presets the marker, is
-  refused and nothing runs. Without the variable, nothing changes. Hidden
-  `__responsibility` prints whose grant a call would use (a read).
+  is built, never at run time. A call that has not been re-run always is: a
+  process whose responsible process has exited reads as responsible for itself
+  while macOS still judges it on the exited one, so that read never skips the
+  re-run. The re-run's marker names the pid that spawned it; a child takes it only
+  from this same binary as its parent, and responsible for itself, and takes it
+  out of its environment before the call runs, so nothing it starts inherits it.
+  Any other marker, or a spawn that fails, is refused and nothing runs. Without
+  the variable, nothing changes. Hidden `__responsibility` prints whose grant a
+  call would use (a read).
 - **`doctor --no-prompt`.** Reads the permissions `--backend` needs and never
   asks for anything: preflight calls only (`AXIsProcessTrusted` with no options,
   `CGPreflightScreenCaptureAccess`). It makes no request, does not open System
