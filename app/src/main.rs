@@ -86,6 +86,8 @@ struct Cli {
     command: Command,
 }
 
+/// A disclaiming build runs every one of these responsible for itself, unless it is in
+/// `runs_in_place`: a variant added here disclaims until someone shows it touches no grant.
 #[derive(Subcommand)]
 enum Command {
     /// Open a target: a URL, a bundle id to launch, or `home`.
@@ -192,17 +194,24 @@ async fn main() {
     }
 }
 
+/// The calls a disclaiming build runs where it is: a closed list of those that touch no macOS
+/// grant (they print, or read and write the session store and the config file). Any other
+/// call, including one added later, runs responsible for itself (disclaim.rs; fleet's
+/// SECAUDIT C1 on #5: a call missed from a list of grant users ran on another process's grant).
+fn runs_in_place(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::Version | Command::Sessions | Command::Session(_) | Command::Config(_)
+    )
+}
+
 async fn run() -> Result<()> {
     let cli = Cli::parse();
-    // the calls that use the macOS grants run responsible for themselves in a build made to
-    // (disclaim.rs); `__responsibility`, a read, always does, so the mechanism is testable
+    // in a build made to (disclaim.rs), every call but the closed list in `runs_in_place` runs
+    // responsible for itself; `__responsibility`, a read, always does, so it is testable
     let is_probe = matches!(cli.command, Command::Responsibility);
-    let is_doctor = matches!(cli.command, Command::Doctor { .. });
-    let is_mcp = matches!(cli.command, Command::Mcp);
     disclaim::ensure_own_responsibility(
-        is_probe
-            || (disclaim::BUILT_TO_DISCLAIM
-                && disclaim::uses_grants(&cli.backend, cli.takeover, is_doctor, is_mcp)),
+        is_probe || (disclaim::BUILT_TO_DISCLAIM && !runs_in_place(&cli.command)),
     )?;
     let store = SessionStore::discover(cli.home.clone())?;
 
@@ -654,5 +663,50 @@ fn ok(json: bool, msg: &str) {
         println!("{}", serde_json::json!({"ok": true, "message": msg}));
     } else {
         println!("{msg}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parsed(argv: &[&str]) -> Command {
+        Cli::try_parse_from(std::iter::once("agent-controller").chain(argv.iter().copied()))
+            .unwrap()
+            .command
+    }
+
+    #[test]
+    fn only_a_closed_list_runs_in_place() {
+        for argv in [
+            &["version"][..],
+            &["sessions"],
+            &["--backend", "mac", "sessions"],
+            &["session", "show", "chrome/x"],
+            &["session", "path", "chrome/x"],
+            &["session", "rm", "chrome/x"],
+            &["session", "prune"],
+            &["config", "show"],
+            &["config", "init"],
+        ] {
+            assert!(runs_in_place(&parsed(argv)), "{argv:?}");
+        }
+        // everything else disclaims, on every backend: displays was missed by a list of
+        // grant users once, and would have run on the spawner's grant
+        for argv in [
+            &["displays"][..],
+            &["doctor"],
+            &["mcp"],
+            &["status"],
+            &["snapshot"],
+            &["screenshot"],
+            &["--backend", "chrome", "use", "http://x"],
+            &["--backend", "ios-sim", "click", ""],
+            &["--backend", "mac", "click", ""],
+            &["--backend", "mac", "menu", "File>New"],
+            &["__responsibility"],
+        ] {
+            assert!(!runs_in_place(&parsed(argv)), "{argv:?}");
+        }
     }
 }

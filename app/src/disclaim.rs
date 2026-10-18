@@ -4,8 +4,9 @@
 //! not on the process itself. Started from a terminal, that is the terminal app. Started
 //! by an orchestrator's session, it is whatever launched the session, and a grant there
 //! covers every process the session runs, not only agent-controller. A build made with
-//! `AGENT_CONTROLLER_DISCLAIM=1` in its environment (fleet's build sets it) runs the calls
-//! that use those grants again, with responsibility disclaimed
+//! `AGENT_CONTROLLER_DISCLAIM=1` in its environment (fleet's build sets it) runs every call
+//! again, with responsibility disclaimed, but a closed list that never touches a grant
+//! (`main.rs` `runs_in_place`: a call added later disclaims unless it is added there)
 //! (`responsibility_spawnattrs_setdisclaim`, as macOS's own helpers do). The grant is then
 //! agent-controller's own, at its own path, and covers it and the children it starts.
 //!
@@ -25,14 +26,6 @@ pub const BUILT_TO_DISCLAIM: bool = match option_env!("AGENT_CONTROLLER_DISCLAIM
 
 /// Set in the re-run's environment: the loop guard.
 pub const MARK: &str = "AGENT_CONTROLLER_DISCLAIMED";
-
-/// Does this call use a grant macOS judges on the responsible process? The mac backend
-/// (AX, events to a pid, screen capture), `--takeover` on any backend (the global
-/// cursor), `doctor` (it reads both grants, and its plain form asks for them), and the MCP
-/// server (any tool call may be the mac backend).
-pub fn uses_grants(backend: &str, takeover: bool, doctor: bool, mcp: bool) -> bool {
-    matches!(backend.to_ascii_lowercase().as_str(), "mac" | "macos") || takeover || doctor || mcp
-}
 
 /// What a call must do before running.
 #[derive(Debug, PartialEq, Eq)]
@@ -178,34 +171,6 @@ pub fn responsibility_record() -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_calls_that_use_grants() {
-        assert!(uses_grants("mac", false, false, false));
-        assert!(uses_grants("MacOS", false, false, false));
-        assert!(
-            uses_grants("chrome", true, false, false),
-            "--takeover is the global cursor"
-        );
-        assert!(
-            uses_grants("ios-sim", false, true, false),
-            "doctor reads both grants"
-        );
-        assert!(
-            uses_grants("ios-sim", false, false, true),
-            "the MCP may drive the mac backend"
-        );
-        for b in [
-            "chrome",
-            "firefox",
-            "safari",
-            "ios-sim",
-            "android-emu",
-            "windows",
-        ] {
-            assert!(!uses_grants(b, false, false, false), "{b}");
-        }
-    }
 
     #[test]
     fn a_marker_never_lets_a_call_run_on_another_process_grant() {
