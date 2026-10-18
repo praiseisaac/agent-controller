@@ -2,6 +2,7 @@
 //! with per-item persistent sessions. Currently wires the iOS Simulator backend;
 //! other backends plug in via the factory registry.
 
+mod disclaim;
 mod factory;
 mod guidance;
 mod mcp;
@@ -132,6 +133,10 @@ enum Command {
     /// Print the version, git commit, build date, and platform (`--json` for a record).
     Version,
     /// Internal: run the firefox BiDi daemon (not for direct use).
+    /// Internal: which process macOS holds responsible for this one (a read; run responsible
+    /// for itself in any build, so the mechanism can be checked).
+    #[command(name = "__responsibility", hide = true)]
+    Responsibility,
     #[command(name = "__firefox-daemon", hide = true)]
     FirefoxDaemon {
         #[arg(long)]
@@ -189,6 +194,16 @@ async fn main() {
 
 async fn run() -> Result<()> {
     let cli = Cli::parse();
+    // the calls that use the macOS grants run responsible for themselves in a build made to
+    // (disclaim.rs); `__responsibility`, a read, always does, so the mechanism is testable
+    let is_probe = matches!(cli.command, Command::Responsibility);
+    let is_doctor = matches!(cli.command, Command::Doctor { .. });
+    let is_mcp = matches!(cli.command, Command::Mcp);
+    disclaim::ensure_own_responsibility(
+        is_probe
+            || (disclaim::BUILT_TO_DISCLAIM
+                && disclaim::uses_grants(&cli.backend, cli.takeover, is_doctor, is_mcp)),
+    )?;
     let store = SessionStore::discover(cli.home.clone())?;
 
     // These commands don't need a controller.
@@ -197,6 +212,10 @@ async fn run() -> Result<()> {
         Command::Session(sub) => return session_cmd(&store, sub, cli.json),
         Command::Config(sub) => return config_cmd(&store, sub, &cli),
         Command::Version => return version_cmd(cli.json),
+        Command::Responsibility => {
+            println!("{}", disclaim::responsibility_record());
+            return Ok(());
+        }
         #[cfg(target_os = "macos")]
         Command::Displays => {
             let displays = agent_controller_mac::displays();
@@ -352,6 +371,7 @@ async fn run() -> Result<()> {
         | Command::Version
         | Command::Displays
         | Command::Doctor
+        | Command::Responsibility
         | Command::Mcp
         | Command::FirefoxDaemon { .. } => {
             unreachable!("handled above")

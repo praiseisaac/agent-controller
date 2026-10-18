@@ -27,6 +27,8 @@ base64.workspace = true
 agent-controller-ios-sim = { path = "../crates/ios-sim" }
 agent-controller-mac = { path = "../crates/mac" }
 agent-controller-safari = { path = "../crates/safari" }
+# posix_spawn with responsibility disclaimed (disclaim.rs); already in Cargo.lock
+libc = "0.2"
 
 # Windows-only backend
 [target.'cfg(target_os = "windows")'.dependencies]
