@@ -197,9 +197,22 @@ enum SessionCmd {
     },
 }
 
-#[tokio::main]
-async fn main() {
-    if let Err(e) = run().await {
+fn main() {
+    // the marker comes out of the environment while this is the only thread, before tokio
+    // starts its workers: changing the environment with other threads running is unsound
+    // (disclaim.rs; fleet's SECAUDIT advisory on #7)
+    disclaim::take_marker();
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(e) => {
+            eprintln!("error: {e:#}");
+            std::process::exit(1);
+        }
+    };
+    if let Err(e) = runtime.block_on(run()) {
         eprintln!("error: {e:#}");
         std::process::exit(1);
     }

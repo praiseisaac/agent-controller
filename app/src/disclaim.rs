@@ -205,8 +205,10 @@ mod sys {
 }
 
 /// The marker this process started with, judged against its parent, and taken out of its
-/// environment so that nothing it starts inherits it (AC12b). Judged once.
-fn take_marker() -> Marker {
+/// environment so that nothing it starts inherits it (AC12b). Judged once. `main` calls it
+/// first, while it is the only thread: the environment is changed before any runtime
+/// thread could read it (fleet's SECAUDIT advisory on #7). Later calls read the judgement.
+pub fn take_marker() -> Marker {
     *STARTED_WITH.get_or_init(|| {
         let value = std::env::var(MARK).ok();
         std::env::remove_var(MARK);
@@ -342,6 +344,29 @@ mod tests {
         assert_eq!(
             act(Decision::Run, || anyhow::bail!("not asked")).unwrap(),
             None
+        );
+    }
+
+    /// The marker leaves the environment while main is the only thread: main calls
+    /// take_marker() before it builds any runtime, and no #[tokio::main] starts one first
+    /// (fleet's SECAUDIT advisory on #7).
+    #[test]
+    fn main_takes_the_marker_before_any_runtime_thread_starts() {
+        let main = include_str!("main.rs");
+        assert!(
+            !main.contains("#[tokio::main]"),
+            "a #[tokio::main] starts its threads before main's first line"
+        );
+        let body = &main[main.find("\nfn main() {").expect("a synchronous fn main")..];
+        let take = body
+            .find("disclaim::take_marker();")
+            .expect("main takes the marker");
+        let runtime = body
+            .find("tokio::runtime::")
+            .expect("main builds the runtime");
+        assert!(
+            take < runtime,
+            "main takes the marker before it builds the runtime"
         );
     }
 }
