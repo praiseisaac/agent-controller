@@ -43,6 +43,9 @@ an app is in the background.
 
 Run `agent-controller doctor` — it reports both, triggers the system prompts, and
 deep-links the settings panes.
+To read the two without asking for anything, for example from a script or a test
+runner, use `agent-controller --backend mac doctor --no-prompt` (`--json` for a
+record). It makes preflight calls only: no prompt, no System Settings, no window.
 
 ## Coordinate model (multi-screen / Retina)
 

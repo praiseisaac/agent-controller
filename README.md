@@ -281,6 +281,7 @@ agent-controller --backend mac --app TextEdit press "Cmd+B"   # bold the selecti
 agent-controller --backend mac --app Finder snapshot
 agent-controller displays            # screen bounds + backing scale
 agent-controller doctor              # check/grant permissions
+agent-controller --backend mac doctor --no-prompt --json   # read only: never prompts, never opens a window
 ```
 
 ### Coordinate model (multi-screen / Retina)

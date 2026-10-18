@@ -26,6 +26,14 @@ The running binary reports its version with `agent-controller --version`
   is still not responsible for itself, or a caller that presets the marker, is
   refused and nothing runs. Without the variable, nothing changes. Hidden
   `__responsibility` prints whose grant a call would use (a read).
+- **`doctor --no-prompt`.** Reads the permissions `--backend` needs and never
+  asks for anything: preflight calls only (`AXIsProcessTrusted` with no options,
+  `CGPreflightScreenCaptureAccess`). It makes no request, does not open System
+  Settings, and brings up no window. Each check not run is listed as skipped,
+  with why. The Safari Remote Automation probe opens a Safari window, so it runs
+  only with `--probe-safari`. `--json` prints `{backend, prompted: false, checks,
+  skipped, ready}`. For callers running unattended (test runners,
+  orchestrators). The plain `doctor` is unchanged.
 
 ## [0.2.0] - 2026-09-24
 

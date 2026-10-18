@@ -3,6 +3,7 @@
 //! other backends plug in via the factory registry.
 
 mod disclaim;
+mod doctor;
 mod factory;
 mod guidance;
 mod mcp;
@@ -120,8 +121,18 @@ enum Command {
     Status,
     /// List displays with bounds + backing scale (for pixel↔point mapping).
     Displays,
-    /// Check macOS permissions and guide through granting them.
-    Doctor,
+    /// Check macOS permissions and guide through granting them (prompts and opens
+    /// System Settings for what is missing). `--no-prompt` only reads.
+    Doctor {
+        /// Read only, never prompt: preflight checks for --backend's needs, no request,
+        /// no System Settings, no window. Lists the checks it skipped.
+        #[arg(long)]
+        no_prompt: bool,
+        /// With --no-prompt and --backend safari: run the Safari Remote Automation probe,
+        /// which briefly opens a Safari window.
+        #[arg(long, requires = "no_prompt")]
+        probe_safari: bool,
+    },
     /// Run an MCP server (stdio) exposing the backends as tools.
     Mcp,
     /// List all sessions.
@@ -248,7 +259,11 @@ async fn run() -> Result<()> {
         }
         #[cfg(not(target_os = "macos"))]
         Command::Displays => return Err(anyhow::anyhow!("`displays` is macOS-only")),
-        Command::Doctor => return doctor(cli.json).await,
+        Command::Doctor {
+            no_prompt: true,
+            probe_safari,
+        } => return doctor_no_prompt(cli.backend.parse()?, *probe_safari, cli.json).await,
+        Command::Doctor { .. } => return doctor(cli.json).await,
         Command::Mcp => return mcp::serve().await,
         Command::FirefoxDaemon {
             session,
@@ -379,7 +394,7 @@ async fn run() -> Result<()> {
         | Command::Config(_)
         | Command::Version
         | Command::Displays
-        | Command::Doctor
+        | Command::Doctor { .. }
         | Command::Responsibility
         | Command::Mcp
         | Command::FirefoxDaemon { .. } => {
@@ -563,6 +578,51 @@ fn session_cmd(store: &SessionStore, sub: &SessionCmd, json: bool) -> Result<()>
     }
     Ok(())
 }
+
+// ── doctor --no-prompt ── (only preflight reads from here to the end marker: doctor.rs's test checks it)
+#[cfg(target_os = "macos")]
+struct MacPreflight;
+#[cfg(target_os = "macos")]
+impl doctor::Preflight for MacPreflight {
+    fn accessibility(&self) -> bool {
+        agent_controller_mac::setup::ax_trusted()
+    }
+    fn screen_recording(&self) -> bool {
+        agent_controller_mac::setup::screen_recording_ok()
+    }
+}
+#[cfg(not(target_os = "macos"))]
+struct MacPreflight;
+#[cfg(not(target_os = "macos"))]
+impl doctor::Preflight for MacPreflight {
+    fn accessibility(&self) -> bool {
+        false
+    }
+    fn screen_recording(&self) -> bool {
+        false
+    }
+}
+
+async fn doctor_no_prompt(backend: Backend, probe_safari: bool, json: bool) -> Result<()> {
+    let (run, skipped) = doctor::plan(backend, probe_safari, cfg!(target_os = "macos"));
+    // the Safari probe, only when the plan has it: --probe-safari on the safari backend
+    #[cfg(target_os = "macos")]
+    let safari = if run.contains(&doctor::Check::SafariRemoteAutomation) {
+        Some(agent_controller_safari::remote_automation_status().await)
+    } else {
+        None
+    };
+    #[cfg(not(target_os = "macos"))]
+    let safari = None;
+    let rec = doctor::report(backend, &run, &skipped, &MacPreflight, safari);
+    if json {
+        println!("{rec}");
+    } else {
+        print!("{}", doctor::text(&rec));
+    }
+    Ok(())
+}
+// ── end doctor --no-prompt ──
 
 #[cfg(not(target_os = "macos"))]
 async fn doctor(_json: bool) -> Result<()> {
