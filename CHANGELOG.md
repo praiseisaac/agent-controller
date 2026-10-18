@@ -14,6 +14,18 @@ The running binary reports its version with `agent-controller --version`
   repository names its commit with this variable. `git` is not asked, so the
   binary reports the vendored commit, not the host repository's. Anything but
   7-40 lowercase hex digits fails the build.
+- **`AGENT_CONTROLLER_DISCLAIM=1` (at build time): the grants it uses are its own.**
+  macOS judges Accessibility and Screen Recording on a process's *responsible*
+  process. Started by an orchestrator's session, that is whatever launched the
+  session, whose grant covers every process the session runs. A binary built
+  with this variable runs every call again with responsibility disclaimed, except
+  a closed list that touches no grant (`version`, `sessions`, `session`,
+  `config`), so the grant is agent-controller's own, at its own path. A call
+  added later disclaims too, unless it is added to that list. The decision is fixed when the binary
+  is built, never at run time. The loop guard is the state itself: a re-run that
+  is still not responsible for itself, or a caller that presets the marker, is
+  refused and nothing runs. Without the variable, nothing changes. Hidden
+  `__responsibility` prints whose grant a call would use (a read).
 
 ## [0.2.0] - 2026-09-24
 

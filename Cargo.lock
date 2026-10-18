@@ -42,6 +42,7 @@ dependencies = [
  "anyhow",
  "base64",
  "clap",
+ "libc",
  "serde_json",
  "tokio",
 ]
