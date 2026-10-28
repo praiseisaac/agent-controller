@@ -10,10 +10,14 @@
 //! - Re-snapshot after the page changes; stale `@ref`s fail with "no element".
 //! - Windows cold-start at 1360x800 (~1.7:1) unless configured
 //!   (`Options::launch`); a running Chrome is not resized.
+//! - `AGENT_CONTROLLER_REALISTIC=1` drives the page like a person: curved,
+//!   eased pointer moves, a beat before each click, uneven typing, and a drawn
+//!   cursor a screencast shows (`realistic.rs`). Off, input is instant.
 //!   Canonical guidance: `app/src/guidance.rs`.
 
 mod cdp;
 mod launch;
+pub mod realistic;
 
 use agent_controller_core::{
     anyhow, Backend, BackendFactory, Capabilities, Controller, Element, Identity, Image,
@@ -24,7 +28,8 @@ use base64::Engine;
 use cdp::CdpClient;
 use serde::Deserialize;
 use serde_json::json;
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 fn port_for(name: &str) -> u16 {
@@ -53,6 +58,24 @@ fn js_str(s: &str) -> String {
 pub struct ChromeController {
     cdp: Arc<CdpClient>,
     target: String,
+    /// Realistic input (`AGENT_CONTROLLER_REALISTIC`); `None` is instant input.
+    realistic: Option<Realism>,
+}
+
+/// A realistic session's state: its timing source, and where the pointer was
+/// left (the session folder's `pointer.json`) so the next call — a separate
+/// process — glides on from there instead of jumping.
+struct Realism {
+    rng: Mutex<realistic::Rng>,
+    pointer_file: PathBuf,
+}
+
+#[derive(Deserialize)]
+struct Box2 {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
 }
 
 #[derive(Deserialize)]
@@ -91,6 +114,172 @@ impl ChromeController {
             .cloned()
             .unwrap_or(serde_json::Value::Null))
     }
+
+    async fn send(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
+        self.cdp.send(method, params).await.map_err(|e| anyhow!(e))
+    }
+
+    /// Draw the cursor into this document and every one this connection loads,
+    /// at the pointer's last place. Best effort: a page mid-load may refuse it.
+    async fn ensure_cursor(&self) {
+        let Some(r) = &self.realistic else { return };
+        let _ = self
+            .send(
+                "Page.addScriptToEvaluateOnNewDocument",
+                json!({ "source": realistic::CURSOR_JS }),
+            )
+            .await;
+        let _ = self.eval(realistic::CURSOR_JS).await;
+        if let Some((x, y)) = read_pointer(&r.pointer_file) {
+            let _ = self
+                .eval(&format!(
+                    "window.__acCursorAt && window.__acCursorAt({x},{y})"
+                ))
+                .await;
+        }
+    }
+
+    fn rng<T>(&self, f: impl FnOnce(&mut realistic::Rng) -> T) -> Option<T> {
+        let r = self.realistic.as_ref()?;
+        let mut rng = r.rng.lock().unwrap_or_else(|e| e.into_inner());
+        Some(f(&mut rng))
+    }
+
+    /// Glide the pointer from where it was left to `(x, y)` with real mouse
+    /// events, the drawn cursor following.
+    async fn glide(&self, x: f64, y: f64) -> Result<()> {
+        let Some(r) = &self.realistic else {
+            return Ok(());
+        };
+        let from = match read_pointer(&r.pointer_file) {
+            Some(p) => p,
+            None => {
+                let v = self.eval("[innerWidth / 2, innerHeight / 2]").await?;
+                (
+                    v[0].as_f64().unwrap_or(680.0),
+                    v[1].as_f64().unwrap_or(400.0),
+                )
+            }
+        };
+        let steps = self
+            .rng(|rng| realistic::mouse_path(rng, from, (x, y)))
+            .unwrap_or_default();
+        let _ = self.eval("window.__acDriving = true").await;
+        for s in steps {
+            self.send(
+                "Input.dispatchMouseEvent",
+                json!({ "type": "mouseMoved", "x": s.x, "y": s.y }),
+            )
+            .await?;
+            tokio::time::sleep(Duration::from_millis(s.wait_ms)).await;
+        }
+        let _ = std::fs::write(&r.pointer_file, json!({ "x": x, "y": y }).to_string());
+        Ok(())
+    }
+
+    /// A person's click: find the element, glide to a point near its centre,
+    /// wait a beat, press and release there.
+    async fn realistic_click(&self, loc: &Locator) -> Result<()> {
+        let (x, y) = match loc {
+            Locator::Point { x, y } => (*x, *y),
+            _ => {
+                let v = self.eval(&locate_box_js(loc)).await?;
+                let b: Box2 = serde_json::from_value(v).map_err(|e| anyhow!("element box: {e}"))?;
+                self.rng(|rng| realistic::click_point(rng, b.x, b.y, b.w, b.h))
+                    .unwrap_or((b.x + b.w / 2.0, b.y + b.h / 2.0))
+            }
+        };
+        self.ensure_cursor().await;
+        self.glide(x, y).await?;
+        let pause = self.rng(realistic::click_pause_ms).unwrap_or(0);
+        tokio::time::sleep(Duration::from_millis(pause)).await;
+        let _ = self.eval("window.__acDriving = true").await;
+        for kind in ["mousePressed", "mouseReleased"] {
+            self.send(
+                "Input.dispatchMouseEvent",
+                json!({ "type": kind, "x": x, "y": y, "button": "left", "clickCount": 1 }),
+            )
+            .await?;
+            let hold = self.rng(realistic::hold_ms).unwrap_or(0);
+            tokio::time::sleep(Duration::from_millis(hold)).await;
+        }
+        let _ = self.eval("window.__acDriving = false").await;
+        // the click may have loaded a new document: draw the cursor into it too
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        self.ensure_cursor().await;
+        Ok(())
+    }
+
+    /// A person's typing: one key at a time, in the uneven rhythm of
+    /// `realistic::typing`. A character with no key of its own (accents,
+    /// emoji, newline) is inserted as text, as instant typing does.
+    async fn realistic_type(&self, text: &str) -> Result<()> {
+        let strokes = self
+            .rng(|rng| realistic::typing(rng, text))
+            .unwrap_or_default();
+        for k in strokes {
+            if k.ch.is_ascii_graphic() || k.ch == ' ' {
+                let s = k.ch.to_string();
+                let mut down =
+                    json!({ "type": "keyDown", "key": s, "text": s, "unmodifiedText": s });
+                let mut up = json!({ "type": "keyUp", "key": s });
+                // a letter, digit or space carries its code; a symbol's would
+                // name another key (`.` is 46, Delete), so it goes by text alone
+                if k.ch.is_ascii_alphanumeric() || k.ch == ' ' {
+                    let (_, code, vk) = key_info(&if k.ch == ' ' {
+                        "space".into()
+                    } else {
+                        k.ch.to_ascii_lowercase().to_string()
+                    })?;
+                    for e in [&mut down, &mut up] {
+                        e["code"] = json!(code);
+                        e["windowsVirtualKeyCode"] = json!(vk);
+                    }
+                }
+                self.send("Input.dispatchKeyEvent", down).await?;
+                tokio::time::sleep(Duration::from_millis(k.hold_ms)).await;
+                self.send("Input.dispatchKeyEvent", up).await?;
+            } else {
+                self.send("Input.insertText", json!({ "text": k.ch.to_string() }))
+                    .await?;
+            }
+            tokio::time::sleep(Duration::from_millis(k.gap_ms)).await;
+        }
+        Ok(())
+    }
+}
+
+/// The pointer's last place in a realistic session, if one was saved.
+fn read_pointer(file: &PathBuf) -> Option<(f64, f64)> {
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(file).ok()?).ok()?;
+    Some((v.get("x")?.as_f64()?, v.get("y")?.as_f64()?))
+}
+
+/// JS that finds the element a locator names, scrolls it into view, and
+/// returns its box — the realistic click's target. Finds as `click` does.
+fn locate_box_js(loc: &Locator) -> String {
+    let find = match loc {
+        Locator::Ref(r) => format!(
+            "document.querySelector('[data-abf-ref=\"{r}\"]') || (() => {{ throw new Error('no element @{r}'); }})()"
+        ),
+        Locator::Css(s) => format!(
+            "document.querySelector({sel}) || (() => {{ throw new Error('no element'); }})()",
+            sel = js_str(s)
+        ),
+        Locator::Label(s) | Locator::Text(s) => format!(
+            "(() => {{ const t={needle}.toLowerCase(); return [...document.querySelectorAll('a,button,input,select,textarea,[role],[onclick],summary')].find(e => ((e.innerText||e.value||e.getAttribute('aria-label')||'').trim().toLowerCase().includes(t)) && e.getBoundingClientRect().width>0); }})() || (() => {{ throw new Error('no element with text'); }})()",
+            needle = js_str(&s.to_lowercase())
+        ),
+        Locator::Role { role, name } => format!(
+            "(() => {{ const role={r}; const nm={n}; return [...document.querySelectorAll('[role],a,button,input,select,textarea')].find(e => ((e.getAttribute('role')||e.tagName.toLowerCase())===role) && (!nm || ((e.innerText||e.value||e.getAttribute('aria-label')||'').toLowerCase().includes(nm)))); }})() || (() => {{ throw new Error('no matching role'); }})()",
+            r = js_str(role),
+            n = js_str(&name.clone().unwrap_or_default().to_lowercase())
+        ),
+        Locator::Point { x, y } => format!("document.elementFromPoint({x},{y})"),
+    };
+    format!(
+        "(async () => {{ const el = {find}; el.scrollIntoView({{block:'center'}}); await new Promise(r => requestAnimationFrame(() => r())); const b = el.getBoundingClientRect(); return {{ x: b.left, y: b.top, w: b.width, h: b.height }}; }})()"
+    )
 }
 
 #[async_trait]
@@ -119,6 +308,7 @@ impl Controller for ChromeController {
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
+        self.ensure_cursor().await;
         Ok(())
     }
 
@@ -160,6 +350,9 @@ impl Controller for ChromeController {
     }
 
     async fn click(&self, loc: &Locator) -> Result<()> {
+        if self.realistic.is_some() {
+            return self.realistic_click(loc).await;
+        }
         let js = match loc {
             Locator::Ref(r) => format!(
                 "(() => {{ const el=document.querySelector('[data-abf-ref=\"{r}\"]'); if(!el) throw new Error('no element @{r}'); el.scrollIntoView({{block:'center'}}); if(el.focus) try{{el.focus();}}catch(e){{}} el.click(); return true; }})()"
@@ -185,6 +378,9 @@ impl Controller for ChromeController {
     }
 
     async fn type_text(&self, text: &str) -> Result<()> {
+        if self.realistic.is_some() {
+            return self.realistic_type(text).await;
+        }
         self.cdp
             .send("Input.insertText", json!({ "text": text }))
             .await
@@ -206,6 +402,9 @@ impl Controller for ChromeController {
             .send("Input.dispatchKeyEvent", down)
             .await
             .map_err(|e| anyhow!(e))?;
+        if let Some(hold) = self.rng(realistic::hold_ms) {
+            tokio::time::sleep(Duration::from_millis(hold)).await;
+        }
         self.cdp
             .send("Input.dispatchKeyEvent", up)
             .await
@@ -227,6 +426,7 @@ impl Controller for ChromeController {
     }
 
     async fn screenshot(&self) -> Result<Image> {
+        self.ensure_cursor().await;
         let r = self
             .cdp
             .send("Page.captureScreenshot", json!({ "format": "png" }))
@@ -402,7 +602,24 @@ impl BackendFactory for ChromeFactory {
             serde_json::to_value(&opts.launch).unwrap_or(serde_json::Value::Null)
         };
         rec.config = json!({ "port": port, "launch": launched_with });
-        Ok(Box::new(ChromeController { cdp, target: name }))
+        let realistic =
+            if realistic::enabled(std::env::var(realistic::ENV_REALISTIC).ok().as_deref()) {
+                let seed =
+                    realistic::seed(std::env::var(realistic::ENV_REALISTIC_SEED).ok().as_deref());
+                Some(Realism {
+                    rng: Mutex::new(realistic::Rng::new(seed)),
+                    pointer_file: store.paths(&rec.id)?.dir.join("pointer.json"),
+                })
+            } else {
+                None
+            };
+        let ctl = ChromeController {
+            cdp,
+            target: name,
+            realistic,
+        };
+        ctl.ensure_cursor().await;
+        Ok(Box::new(ctl))
     }
 }
 

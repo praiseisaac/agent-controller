@@ -10,6 +10,13 @@ The running binary reports its version with `agent-controller --version`
 ## [Unreleased]
 
 ### Added
+- **Chrome: realistic input (`AGENT_CONTROLLER_REALISTIC=1`).** Clicks glide a
+  pointer along a curved, eased path (long moves overshoot and settle) and wait
+  a short beat before pressing with real mouse events; typing comes one key at a
+  time in an uneven rhythm; a drawn cursor, hidden from snapshots, shows in a
+  screencast and hides when the person's own pointer moves. Off by default, and
+  off is the instant input it was. `AGENT_CONTROLLER_REALISTIC_SEED` fixes the
+  timings.
 - **`AGENT_CONTROLLER_BUILD_SHA`.** A build of source vendored into another
   repository names its commit with this variable. `git` is not asked, so the
   binary reports the vendored commit, not the host repository's. Anything but
