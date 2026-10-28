@@ -9,6 +9,14 @@ The running binary reports its version with `agent-controller --version`
 
 ## [Unreleased]
 
+### Changed
+- **Chrome: the realistic cursor runs in an isolated world.** Its script and
+  state are no longer in the page's main world (`window.__acCursor`,
+  `__acDriving`, `__acCursorAt` are gone): the overlay runs in the
+  `agent-controller-cursor` world, and what it shares between calls is on the
+  cursor element (`data-driving`). The page sees only the two `aria-hidden`
+  elements.
+
 ### Added
 - **Chrome: realistic input (`AGENT_CONTROLLER_REALISTIC=1`).** Clicks glide a
   pointer along a curved, eased path (long moves overshoot and settle) and wait

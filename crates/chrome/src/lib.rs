@@ -119,23 +119,43 @@ impl ChromeController {
         self.cdp.send(method, params).await.map_err(|e| anyhow!(e))
     }
 
+    /// Run `js` in the main frame's cursor world (`realistic::CURSOR_WORLD`),
+    /// never the page's own. Best effort: a page mid-load may have no frame.
+    async fn in_cursor_world(&self, js: &str) {
+        let Ok(tree) = self.send("Page.getFrameTree", json!({})).await else { return };
+        let Some(frame) = tree.pointer("/frameTree/frame/id").cloned() else { return };
+        let Ok(world) = self
+            .send(
+                "Page.createIsolatedWorld",
+                json!({ "frameId": frame, "worldName": realistic::CURSOR_WORLD }),
+            )
+            .await
+        else {
+            return;
+        };
+        let Some(ctx) = world.get("executionContextId").cloned() else { return };
+        let _ = self
+            .send(
+                "Runtime.evaluate",
+                json!({ "expression": js, "contextId": ctx, "returnByValue": true }),
+            )
+            .await;
+    }
+
     /// Draw the cursor into this document and every one this connection loads,
-    /// at the pointer's last place. Best effort: a page mid-load may refuse it.
+    /// at the pointer's last place — in its own world, so the page's has no
+    /// trace of it but the elements. Best effort: a page mid-load may refuse it.
     async fn ensure_cursor(&self) {
         let Some(r) = &self.realistic else { return };
         let _ = self
             .send(
                 "Page.addScriptToEvaluateOnNewDocument",
-                json!({ "source": realistic::CURSOR_JS }),
+                json!({ "source": realistic::CURSOR_JS, "worldName": realistic::CURSOR_WORLD }),
             )
             .await;
-        let _ = self.eval(realistic::CURSOR_JS).await;
+        self.in_cursor_world(realistic::CURSOR_JS).await;
         if let Some((x, y)) = read_pointer(&r.pointer_file) {
-            let _ = self
-                .eval(&format!(
-                    "window.__acCursorAt && window.__acCursorAt({x},{y})"
-                ))
-                .await;
+            self.in_cursor_world(&realistic::place_js(x, y)).await;
         }
     }
 
@@ -164,7 +184,7 @@ impl ChromeController {
         let steps = self
             .rng(|rng| realistic::mouse_path(rng, from, (x, y)))
             .unwrap_or_default();
-        let _ = self.eval("window.__acDriving = true").await;
+        self.in_cursor_world(&realistic::driving_js(true)).await;
         for s in steps {
             self.send(
                 "Input.dispatchMouseEvent",
@@ -193,7 +213,7 @@ impl ChromeController {
         self.glide(x, y).await?;
         let pause = self.rng(realistic::click_pause_ms).unwrap_or(0);
         tokio::time::sleep(Duration::from_millis(pause)).await;
-        let _ = self.eval("window.__acDriving = true").await;
+        self.in_cursor_world(&realistic::driving_js(true)).await;
         for kind in ["mousePressed", "mouseReleased"] {
             self.send(
                 "Input.dispatchMouseEvent",
@@ -203,7 +223,7 @@ impl ChromeController {
             let hold = self.rng(realistic::hold_ms).unwrap_or(0);
             tokio::time::sleep(Duration::from_millis(hold)).await;
         }
-        let _ = self.eval("window.__acDriving = false").await;
+        self.in_cursor_world(&realistic::driving_js(false)).await;
         // the click may have loaded a new document: draw the cursor into it too
         tokio::time::sleep(Duration::from_millis(150)).await;
         self.ensure_cursor().await;
