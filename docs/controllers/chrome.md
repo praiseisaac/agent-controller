@@ -72,7 +72,11 @@ A drawn cursor (13x17 px, an orange ring on each click) is put into every
 document (`Page.addScriptToEvaluateOnNewDocument`, and drawn again after each
 call), so a screencast of the tab shows the pointer. It is `aria-hidden`,
 `pointer-events:none`, `inert` and has no role, so snapshots and `@ref`s never
-include it. It hides when a mouse move the driver did not make comes in. The
+include it. It hides when a mouse move the driver did not make comes in. Its
+script runs in an isolated world (`agent-controller-cursor`), never the page's:
+the page sees the two elements and no global or function. Its state (whether
+the driver is moving, where it is) is on the element, since each call is a new
+CDP session and so a new world. The
 pointer's last place is kept in the session folder (`pointer.json`), so the next
 call glides on from there. Nothing brings the window to the front.
 

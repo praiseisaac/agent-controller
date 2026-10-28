@@ -188,43 +188,65 @@ pub fn typing(rng: &mut Rng, text: &str) -> Vec<KeyStroke> {
         .collect()
 }
 
-/// The drawn cursor, put into every document. `window.__acDriving` is set by
-/// the driver around its own moves; any other move is the person's pointer, so
-/// the drawn one hides until the driver moves again. `window.__acCursorAt(x,y)`
-/// places it without a move (a fresh page, a resumed session).
+/// The isolated world the drawn cursor lives in. Its script and its state are
+/// never in the page's own world: the page sees two `aria-hidden` elements and
+/// nothing else — no global, no function it could call or replace.
+pub const CURSOR_WORLD: &str = "agent-controller-cursor";
+
+/// The drawn cursor, put into every document, run in [`CURSOR_WORLD`]. Each
+/// CLI call is a new CDP session and so a new isolated world, so its state is
+/// kept on the cursor element, not in a world's globals: `data-driving="1"`
+/// while the driver moves (any other move is the person's pointer, and the
+/// drawn one hides until the driver moves again), and the world that mounted
+/// it keeps its listeners for the life of the document; a later world finds
+/// the element and adds none.
 pub const CURSOR_JS: &str = r#"(() => {
-  if (window.__acCursor) return; window.__acCursor = true;
-  let c = null, ring = null, at = null;
-  const place = (x, y) => { at = [x, y]; if (c) { c.style.opacity = '1'; c.style.transform = 'translate(' + x + 'px,' + y + 'px)'; } };
-  window.__acCursorAt = place;
+  const SEL = '[data-agent-controller-cursor="pointer"]';
+  const q = () => document.querySelector(SEL);
   const mount = () => {
-    if (c) return;
-    const quiet = (el) => { el.setAttribute('aria-hidden', 'true'); el.setAttribute('data-agent-controller-cursor', ''); el.inert = true; };
-    c = document.createElement('div');
+    if (q() || !document.documentElement) return;
+    const quiet = (el, part) => { el.setAttribute('aria-hidden', 'true'); el.setAttribute('data-agent-controller-cursor', part); el.inert = true; };
+    const c = document.createElement('div');
     c.innerHTML = '<svg width="13" height="17" viewBox="0 0 22 28"><path d="M1 1 L1 22 L6.5 16.8 L10.2 26 L13.6 24.6 L9.9 15.5 L17 15.5 Z" fill="black" stroke="white" stroke-width="1.6" stroke-linejoin="round"/></svg>';
     Object.assign(c.style, { position: 'fixed', left: '0px', top: '0px', width: '13px', height: '17px',
       pointerEvents: 'none', zIndex: '2147483647', opacity: '0', transform: 'translate(-40px,-40px)' });
-    ring = document.createElement('div');
+    const ring = document.createElement('div');
     Object.assign(ring.style, { position: 'fixed', width: '22px', height: '22px', marginLeft: '-11px', marginTop: '-11px',
       borderRadius: '50%', border: '2px solid rgba(255,140,0,0.85)', pointerEvents: 'none', zIndex: '2147483646',
       opacity: '0', left: '0px', top: '0px' });
-    quiet(c); quiet(ring);
+    quiet(c, 'pointer'); quiet(ring, 'ring');
     document.documentElement.appendChild(ring);
     document.documentElement.appendChild(c);
-    if (at) place(at[0], at[1]);
+    addEventListener('mousemove', e => {
+      const p = q(); if (!p) return;
+      if (p.dataset.driving !== '1') { p.style.opacity = '0'; return; }
+      p.style.opacity = '1'; p.style.transform = 'translate(' + e.clientX + 'px,' + e.clientY + 'px)';
+    }, true);
+    addEventListener('mousedown', e => {
+      const p = q(); if (!p || p.dataset.driving !== '1') return;
+      ring.style.left = e.clientX + 'px'; ring.style.top = e.clientY + 'px';
+      ring.style.transition = 'none'; ring.style.opacity = '1'; ring.style.transform = 'scale(0.6)';
+      requestAnimationFrame(() => { ring.style.transition = 'opacity 0.6s, transform 0.6s'; ring.style.opacity = '0'; ring.style.transform = 'scale(1.4)'; });
+    }, true);
   };
-  addEventListener('mousemove', e => {
-    if (!window.__acDriving) { if (c) c.style.opacity = '0'; return; }
-    place(e.clientX, e.clientY);
-  }, true);
-  addEventListener('mousedown', e => {
-    if (!window.__acDriving || !ring) return;
-    ring.style.left = e.clientX + 'px'; ring.style.top = e.clientY + 'px';
-    ring.style.transition = 'none'; ring.style.opacity = '1'; ring.style.transform = 'scale(0.6)';
-    requestAnimationFrame(() => { ring.style.transition = 'opacity 0.6s, transform 0.6s'; ring.style.opacity = '0'; ring.style.transform = 'scale(1.4)'; });
-  }, true);
   if (document.documentElement) mount(); else addEventListener('DOMContentLoaded', mount);
 })()"#;
+
+/// JS (for [`CURSOR_WORLD`]) marking the driver's own moves on or off.
+pub fn driving_js(on: bool) -> String {
+    format!(
+        "(() => {{ const p = document.querySelector('[data-agent-controller-cursor=\"pointer\"]'); if (p) p.dataset.driving = '{}'; }})()",
+        if on { "1" } else { "0" }
+    )
+}
+
+/// JS (for [`CURSOR_WORLD`]) placing the drawn cursor at `(x, y)` without a
+/// move: a fresh page, a resumed session.
+pub fn place_js(x: f64, y: f64) -> String {
+    format!(
+        "(() => {{ const p = document.querySelector('[data-agent-controller-cursor=\"pointer\"]'); if (p) {{ p.style.opacity = '1'; p.style.transform = 'translate({x}px,{y}px)'; }} }})()"
+    )
+}
 
 #[cfg(test)]
 mod tests {
@@ -347,5 +369,17 @@ mod tests {
         assert!(CURSOR_JS.contains("pointerEvents: 'none'"));
         // a role would put it in the snapshot's selector list
         assert!(!CURSOR_JS.contains("role"));
+    }
+
+    #[test]
+    fn cursor_leaves_no_global_in_any_world() {
+        // its state is on the element (RI1): nothing on window for the page to read, call or replace
+        for js in [CURSOR_JS.to_string(), driving_js(true), driving_js(false), place_js(1.0, 2.0)] {
+            assert!(!js.contains("window."), "{js}");
+            assert!(!js.contains("__ac"), "{js}");
+        }
+        assert!(driving_js(true).contains("driving = '1'"));
+        assert!(driving_js(false).contains("driving = '0'"));
+        assert!(place_js(12.5, 30.0).contains("translate(12.5px,30px)"));
     }
 }
