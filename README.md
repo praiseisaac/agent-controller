@@ -300,7 +300,7 @@ pixel read off a screenshot back to a click point, divide by that display's
 ### Permissions
 
 - **Accessibility** — required for AX read + input. Grant it to your *terminal
-  app* (e.g. iTerm/Terminal) in System Settings ▸ Privacy & Security ▸
+  app* or agent launcher named by macOS in System Settings ▸ Privacy & Security ▸
   Accessibility. Without it, AX commands error with a clear message.
 - **Screen Recording** — required for `screenshot`.
 

@@ -43,8 +43,10 @@ fn require_ax_trust() -> Result<()> {
         Ok(())
     } else {
         Err(anyhow!(
-            "Accessibility permission not granted. Enable it for your terminal app in \
-             System Settings ▸ Privacy & Security ▸ Accessibility, then retry."
+            "Accessibility permission not granted to this controlling process. Run \
+             `agent-controller --backend mac doctor --no-prompt` to identify its permission \
+             context. Enable the app named by macOS (your terminal, agent launcher, or \
+             agent-controller) in System Settings ▸ Privacy & Security ▸ Accessibility, then retry."
         ))
     }
 }

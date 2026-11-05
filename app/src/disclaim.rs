@@ -64,6 +64,19 @@ mod sys {
         unsafe { responsibility_get_pid_responsible_for_pid(pid) }
     }
 
+    /// Read the executable identity without inspecting arguments or requesting access.
+    pub fn process_path(pid: i32) -> Option<String> {
+        let mut bytes = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+        let count = unsafe {
+            libc::proc_pidpath(pid, bytes.as_mut_ptr().cast(), bytes.len() as u32)
+        };
+        if count <= 0 {
+            return None;
+        }
+        let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
+        Some(String::from_utf8_lossy(&bytes[..end]).into_owned())
+    }
+
     fn cstr(s: &OsStr) -> Option<CString> {
         CString::new(s.as_bytes()).ok()
     }
@@ -159,12 +172,17 @@ pub fn responsibility_record() -> serde_json::Value {
     let responsible = sys::responsible_for(pid);
     #[cfg(not(target_os = "macos"))]
     let responsible = pid;
+    #[cfg(target_os = "macos")]
+    let responsible_executable = sys::process_path(responsible);
+    #[cfg(not(target_os = "macos"))]
+    let responsible_executable: Option<String> = None;
     serde_json::json!({
         "pid": pid,
         "responsible_pid": responsible,
         "self_responsible": responsible == pid,
         "rerun": std::env::var_os(MARK).is_some(),
         "built_to_disclaim": BUILT_TO_DISCLAIM,
+        "responsible_executable": responsible_executable,
     })
 }
 

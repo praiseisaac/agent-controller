@@ -36,9 +36,10 @@ an app is in the background.
 
 ## Prerequisites & setup
 
-1. **Accessibility** permission (read UI tree + send input) — grant it to your
-   *terminal app* (e.g. iTerm/Terminal) in System Settings ▸ Privacy & Security ▸
-   Accessibility.
+1. **Accessibility** permission (read UI tree + send input) — grant it to the
+   controlling app named by macOS in System Settings ▸ Privacy & Security ▸
+   Accessibility. This can be a terminal, an agent launcher such as ChatGPT, or
+   agent-controller itself in a build configured to own its permission identity.
 2. **Screen Recording** permission (screenshots).
 
 Run `agent-controller doctor` — it reports both, triggers the system prompts, and
@@ -87,7 +88,26 @@ Locators: `@ref`, `"Label"`, `(x,y)`. (CSS is browser-only.)
   expose less. When an element has no `AXPress`, a coordinate click at its frame
   center is used.
 - **"Accessibility permission not granted"** → run `agent-controller doctor` and
-  enable your terminal app; permission is per-binary/terminal, so re-grant if you
+  enable the controlling app named by macOS; the launcher or binary identity matters, so re-grant if you
   switch terminals.
 - **Blank/occluded screenshot** → ensure Screen Recording is granted; capture is
   by window id so occlusion is handled, but the app must have an on-screen window.
+
+### An enabled Agent Controller toggle, but a denied command
+
+Run `agent-controller --backend mac doctor --no-prompt --json` from the **same
+launcher** as the failing command. `permission_identity.responsible_executable`
+shows which executable macOS holds responsible for that run; `responsible_pid`,
+`self_responsible` and `built_to_disclaim` explain whether it inherited its
+launcher. These are read-only diagnostics; unavailable process paths are reported
+as null, and no grant or prompt is changed. Ordinary doctor text shows the same
+identity.
+
+For example, a command launched by ChatGPT can be attributed to ChatGPT even
+when a separate agent-controller entry is enabled. Enable the app named by the
+macOS permission prompt, then rerun the check in the original launcher. The
+internal `__responsibility` command deliberately runs a self-responsible probe;
+it should not be used to infer the permission identity of an ordinary command.
+
+This diagnostic does not change responsibility, sign or replace binaries, reset
+permissions, or grant access. A rebuild alone cannot grant macOS permission.

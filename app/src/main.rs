@@ -614,7 +614,10 @@ async fn doctor_no_prompt(backend: Backend, probe_safari: bool, json: bool) -> R
     };
     #[cfg(not(target_os = "macos"))]
     let safari = None;
-    let rec = doctor::report(backend, &run, &skipped, &MacPreflight, safari);
+    let mut rec = doctor::report(backend, &run, &skipped, &MacPreflight, safari);
+    if backend == Backend::Mac && cfg!(target_os = "macos") {
+        rec["permission_identity"] = disclaim::responsibility_record();
+    }
     if json {
         println!("{rec}");
     } else {
@@ -649,6 +652,7 @@ async fn doctor(json: bool) -> Result<()> {
                 "safaridriver": safaridriver,
                 "safari_remote_automation": remote_automation,
                 "ready": ax && screen,
+                "permission_identity": disclaim::responsibility_record(),
             })
         );
         return Ok(());
@@ -656,6 +660,7 @@ async fn doctor(json: bool) -> Result<()> {
 
     let mark = |b: bool| if b { "granted ✓" } else { "NOT granted ✗" };
     println!("agent-controller doctor — macOS permissions\n");
+    print!("{}", doctor::permission_identity_text(&disclaim::responsibility_record()));
     println!("  Accessibility (mac)          : {}", mark(ax));
     println!("  Screen Recording (mac)       : {}", mark(screen));
     println!(
@@ -675,14 +680,14 @@ async fn doctor(json: bool) -> Result<()> {
         println!("  Triggering the system prompt and opening the settings pane…");
         setup::ax_request();
         open_settings("Privacy_Accessibility");
-        println!("  Enable your terminal app (e.g. iTerm) there, then re-run `agent-controller doctor`.\n");
+        println!("  Enable the controlling app named by macOS there, then re-run `agent-controller --backend mac doctor --no-prompt`.\n");
     }
     if !screen {
         println!("• Screen Recording (required for mac screenshots)");
         println!("  Triggering the prompt and opening the settings pane…");
         setup::screen_recording_request();
         open_settings("Privacy_ScreenCapture");
-        println!("  Enable your terminal app there, then re-run `agent-controller doctor`.\n");
+        println!("  Enable the controlling app named by macOS there, then re-run `agent-controller --backend mac doctor --no-prompt`.\n");
     }
     if safaridriver && !remote_automation {
         println!("• Safari Remote Automation (required for the safari backend)");

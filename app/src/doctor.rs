@@ -141,7 +141,20 @@ pub fn text(rec: &Value) -> String {
             s["why"].as_str().unwrap_or("")
         ));
     }
+    if let Some(identity) = rec.get("permission_identity") {
+        out.push_str(&permission_identity_text(identity));
+    }
     out
+}
+
+/// The actual current permission context, not a separate disclaimed probe.
+/// macOS names the app in its prompt; the executable path explains a launcher mismatch.
+pub fn permission_identity_text(identity: &Value) -> String {
+    let path = identity["responsible_executable"].as_str().unwrap_or("unavailable");
+    let pid = &identity["responsible_pid"];
+    format!(
+        "  Permission identity: {path} (PID {pid})\n  Enable the controlling app named by macOS in Privacy & Security > Accessibility. A terminal or agent launcher can be responsible for this command; enabling a different agent-controller entry may not grant this run access.\n"
+    )
 }
 
 #[cfg(test)]
